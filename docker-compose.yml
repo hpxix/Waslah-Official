@@ -1,0 +1,124 @@
+services:
+  frontend:
+    build:
+      context: .
+      args:
+        VITE_DIRECTUS_URL: /directus
+    image: waslah/frontend:local
+    container_name: waslah_frontend
+    depends_on:
+      directus:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    networks:
+      - waslah
+    restart: unless-stopped
+
+  frontend_alt:
+    build:
+      context: .
+      args:
+        VITE_DIRECTUS_URL: /directus
+    image: waslah/frontend:alt
+    container_name: waslah_frontend_alt
+    depends_on:
+      directus:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_ALT_PORT:-3001}:80"
+    networks:
+      - waslah
+    restart: unless-stopped
+
+  directus:
+    image: directus/directus:11
+    container_name: waslah_directus
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${DIRECTUS_PORT:-8055}:8055"
+    env_file:
+      - .env.docker
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8055"
+      KEY: "${KEY:-waslah-dev-key-change-before-production}"
+      SECRET: "${SECRET:-waslah-dev-secret-change-before-production}"
+      PUBLIC_URL: "${DIRECTUS_PUBLIC_URL:-http://localhost:8055}"
+      DB_CLIENT: "pg"
+      DB_HOST: "postgres"
+      DB_PORT: "5432"
+      DB_DATABASE: "${POSTGRES_DB:-waslah}"
+      DB_USER: "${POSTGRES_USER:-waslah}"
+      DB_PASSWORD: "${POSTGRES_PASSWORD:-waslah_dev_password}"
+      CACHE_ENABLED: "true"
+      CACHE_STORE: "redis"
+      REDIS: "redis://redis:6379"
+      ADMIN_EMAIL: "${DIRECTUS_ADMIN_EMAIL:-admin@waslah.local}"
+      ADMIN_PASSWORD: "${DIRECTUS_ADMIN_PASSWORD:-change-me-now}"
+      CORS_ENABLED: "true"
+      CORS_ORIGIN: "http://localhost:${FRONTEND_PORT:-3000},http://127.0.0.1:${FRONTEND_PORT:-3000}"
+      WEBSOCKETS_ENABLED: "true"
+    volumes:
+      - directus_uploads:/directus/uploads
+      - ./directus/extensions:/directus/extensions
+      - ./directus/snapshots:/directus/snapshots
+    networks:
+      - waslah
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8055/server/health | grep -q ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: waslah_postgres
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-waslah}"
+      POSTGRES_USER: "${POSTGRES_USER:-waslah}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-waslah_dev_password}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - waslah
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-waslah} -d ${POSTGRES_DB:-waslah}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: waslah_redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - waslah
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+networks:
+  waslah:
+    name: waslah_network
+
+volumes:
+  postgres_data:
+  redis_data:
+  directus_uploads:

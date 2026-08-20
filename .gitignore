@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+
+# Production builds
+dist/
+build/
+.vite/
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+.env.docker
+!.env.example
+!.env.docker.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Runtime data
+docker-data/
+directus/uploads/
+postgres_data/
+redis_data/
+
+# TypeScript/cache artifacts
+*.tsbuildinfo
+node_modules/.cache/
+coverage/

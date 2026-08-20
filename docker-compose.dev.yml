@@ -1,0 +1,26 @@
+services:
+  frontend-dev:
+    image: node:22-alpine
+    container_name: waslah_frontend_dev
+    working_dir: /app
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0 --port 5173"
+    ports:
+      - "${VITE_PORT:-5173}:5173"
+    environment:
+      VITE_DIRECTUS_URL: "http://localhost:${DIRECTUS_PORT:-8055}"
+      VITE_DIRECTUS_AI_FLOW_PATH: "/flows/trigger/waslah-ai"
+      VITE_DIRECTUS_APIFY_FLOW_PATH: "/flows/trigger/apify-leads"
+      VITE_DIRECTUS_RESEARCH_FLOW_PATH: "/flows/trigger/perplexity-research"
+      VITE_DIRECTUS_PROPOSAL_FLOW_PATH: "/flows/trigger/openai-proposal"
+      VITE_DIRECTUS_EMAIL_FLOW_PATH: "/flows/trigger/email-campaign"
+    volumes:
+      - .:/app
+      - frontend_node_modules:/app/node_modules
+    depends_on:
+      directus:
+        condition: service_healthy
+    networks:
+      - waslah
+
+volumes:
+  frontend_node_modules:
