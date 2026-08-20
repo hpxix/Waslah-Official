@@ -34,6 +34,9 @@ async function main() {
       name: "Waslah Smoke Test",
       business: `Waslah Test ${runId}`,
       phone: `+96655${String(runId).slice(-7)}`,
+      privacy_accepted: true,
+      permissions_accepted: true,
+      consent_version: "2026-08-20",
     },
   });
 
