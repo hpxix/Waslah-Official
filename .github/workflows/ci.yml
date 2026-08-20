@@ -33,3 +33,14 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Validate Directus extension and bootstrap
+        run: |
+          node --check directus/bootstrap.mjs
+          node --check directus/extensions/directus-extension-waslah-lead-agent/dist/index.js
+
+      - name: Validate n8n workflow JSON
+        run: node -e "JSON.parse(require('fs').readFileSync('n8n/workflows/lead-agent-directus.json', 'utf8'))"
+
+      - name: Validate Docker Compose
+        run: docker compose --env-file .env.docker.example config --quiet

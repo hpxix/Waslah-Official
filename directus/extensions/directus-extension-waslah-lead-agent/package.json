@@ -1,0 +1,15 @@
+{
+  "name": "directus-extension-waslah-lead-agent",
+  "version": "1.0.0",
+  "description": "Multi-tenant auth, credit, lead inventory, and Vapi orchestration endpoints for Waslah.",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "directus:extension": {
+    "type": "endpoint",
+    "path": "dist/index.js",
+    "source": "",
+    "host": ">=11.0.0 <13.0.0"
+  }
+}

@@ -1,9 +1,13 @@
 # Waslah AI Lead CRM
 
-A refine-based CRM front end for a Directus backend. It models the full flow:
+A multi-tenant lead-agent platform with a React CRM, Directus system of record, n8n orchestration, Apify sourcing, and Vapi qualification calls.
 
 - ChatGPT-style lead intake that clarifies the target audience before Apify runs.
-- Apify lead gathering through Directus flow endpoints.
+- Phone-verified accounts with an idempotent 30 SAR welcome-credit ledger.
+- Google, Microsoft, and Apple account creation through Directus SSO with mandatory phone verification.
+- Shared, deduplicated lead inventory with masked previews and workspace access grants.
+- Apify lead gathering and rate-limited Vapi calling through an importable n8n workflow.
+- Append-only provider events, call attempts, structured qualifications, and retryable outbox records.
 - On-demand Perplexity company research with slugs and company intelligence.
 - CRM overview, lead table, PowerBI-style insight dashboard, proposal workspace, and email-template library.
 - Email marketing actions with three free templates and premium-locked templates.
@@ -11,7 +15,8 @@ A refine-based CRM front end for a Directus backend. It models the full flow:
 ## Run With Docker
 
 ```bash
-docker compose up --build
+cp .env.docker.example .env.docker
+docker compose --env-file .env.docker up --build
 ```
 
 Ports:
@@ -20,45 +25,65 @@ Ports:
 - Directus API/Admin: `http://localhost:8055`
 - Postgres: `localhost:5432`
 - Redis: `localhost:6379`
+- n8n (optional): `http://localhost:5678`
 
 The frontend container serves the built refine app through Nginx and proxies `/directus/*` to the Directus service over Docker networking. That keeps browser integration simple while still letting containers talk through internal service names.
 
-For live frontend development with the same Directus/Postgres/Redis stack:
+Update `.env.docker` before production. Replace every placeholder secret, then add the Apify, Vapi, and Twilio Verify credentials described in [`docs/integrations.md`](docs/integrations.md).
+
+Start the optional automation service and import the bundled workflow:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build frontend-dev directus postgres redis
+docker compose --env-file .env.docker --profile automation up -d n8n
 ```
-
-Then open `http://localhost:5173`.
-
-Update `.env.docker` before production. At minimum replace `KEY`, `SECRET`, database password, and Directus admin password. Add your `OPENAI_API_KEY`, `APIFY_TOKEN`, `PERPLEXITY_API_KEY`, and mail provider settings for the Directus flows.
 
 ## Run Without Docker
 
+For live frontend editing on the same `http://localhost:3000` address:
+
 ```bash
 npm install
+docker compose stop frontend
 npm run dev
 ```
 
-The app ships with local demo data. Add `.env` from `.env.example` to connect Directus flows directly.
+Vite serves the actual React/CSS source with instant refresh and proxies `/directus` to the Directus container on port `8055`. Lead inventory is loaded from Directus; starter records are never bundled into the customer-facing frontend.
+
+See [`docs/frontend-editing.md`](docs/frontend-editing.md) for the small set of files used to change text, styling, branding, registration, and dashboard screens.
 
 ## Backend Shape
 
-See `directus/schema.md` for the recommended collections and flow endpoints.
+The Directus bootstrap creates 14 collections and the customer role automatically. See [`directus/schema.md`](directus/schema.md) for the data contract and [`docs/lead-agent-architecture.md`](docs/lead-agent-architecture.md) for request flow, security, and scaling.
+
+The custom API is mounted at `/lead-agent`. With the Docker frontend it is available through `/directus/lead-agent`.
+
+### Administrator lead inventory
+
+Set `DIRECTUS_ADMIN_EMAIL` and `DIRECTUS_ADMIN_PASSWORD` in the ignored `.env.docker` file, bootstrap Directus, and import the starter datasets with:
+
+```bash
+docker compose --env-file .env.docker run --rm directus-bootstrap
+npm run data:import:starter
+```
+
+The importer normalizes every JSON file in `currentData-Starter`, preserves the original record in `raw_payload`, computes an enrichment score/status, and generates deterministic person and company imagery when the source has none. It is idempotent and can be run again safely.
+
+Only a Directus administrator can call `GET /lead-agent/admin/leads`. The endpoint supports server-side search, filtering, sorting, and pagination. `/console` and every nested console route validate the current Directus session before rendering; anonymous or expired sessions are redirected to `/auth`.
 
 ## Docker Services
 
 - `frontend`: production Nginx container for the refine UI on port `3000`.
-- `frontend_alt`: standby production Nginx container for blue/green deploys on port `3001`.
 - `directus`: Directus backend on port `8055`.
 - `postgres`: persistent Postgres database on port `5432`.
 - `redis`: cache and realtime support on port `6379`.
+- `directus-bootstrap`: idempotent role and collection provisioning; exits after success.
+- `n8n`: optional automation profile using the same Postgres server in a separate schema.
 
 Persistent data lives in Docker volumes: `postgres_data`, `redis_data`, and `directus_uploads`.
 
-## Hostinger Blue/Green Frontend Deploy
+## Hostinger Frontend Deploy
 
-This project is prepared for a zero-downtime frontend deploy on a Hostinger VPS using Docker Compose and NGINX.
+This project is prepared for a production frontend deploy on a Hostinger VPS using Docker Compose and NGINX.
 
 One-time server init:
 
@@ -77,12 +102,7 @@ sudo usermod -aG docker "$USER"
 newgrp docker
 ```
 
-Two frontend containers are available:
-
-- `frontend` maps host port `3000` to the built Nginx frontend.
-- `frontend_alt` maps host port `3001` to the standby frontend.
-
-Only one of them should receive public traffic at a time. Rebuild the standby container, verify it locally, then swap the NGINX upstream.
+The single `frontend` service maps host port `3000` to the built Nginx frontend.
 
 Example NGINX site on Hostinger:
 
@@ -102,42 +122,20 @@ server {
 }
 ```
 
-Switch live traffic by changing `proxy_pass`:
-
-```nginx
-proxy_pass http://127.0.0.1:3000; # frontend live
-proxy_pass http://127.0.0.1:3001; # frontend_alt live
-```
-
-Deploy to standby `frontend_alt`:
-
-```bash
-git pull
-docker compose build frontend_alt
-docker compose up -d frontend_alt
-curl -I http://127.0.0.1:3001/healthz
-```
-
-Deploy to standby `frontend`:
+Deploy the frontend:
 
 ```bash
 git pull
 docker compose build frontend
-docker compose up -d frontend
+docker compose --env-file .env.docker up -d frontend
 curl -I http://127.0.0.1:3000/healthz
 ```
 
-Apply the NGINX switch:
+Validate and reload NGINX:
 
 ```bash
 sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-Deployment rhythm:
-
-1. Check which port NGINX currently points to.
-2. Rebuild the other frontend service.
-3. Verify `/healthz` on the standby port.
-4. Change `proxy_pass` to the standby port.
-5. Reload NGINX.
+The public site and local preview both use port `3000`; there is no secondary Vite or port `3001` frontend.

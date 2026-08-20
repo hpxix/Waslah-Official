@@ -1,69 +1,89 @@
 import {
+  Activity,
+  ArrowUpLeft,
+  ArrowUpRight,
+  ArrowLeft,
   ArrowRight,
   BarChart3,
-  Bot,
+  Bell,
   BriefcaseBusiness,
   Building2,
   BadgeCheck,
-  Camera,
-  CheckCircle2,
+  ChevronDown,
+  CircleDot,
+  Clock3,
   Command,
+  Database,
   FileText,
   Gift,
   LayoutDashboard,
+  LogIn,
   Lock,
   Mail,
-  MessageSquareText,
+  Play,
+  Plus,
+  PhoneCall,
   RefreshCw,
   Search,
   Send,
+  Settings,
   ShieldCheck,
   Sparkles,
-  Smartphone,
   Target,
   UserPlus,
-  Wallet,
+  WalletCards,
+  Zap,
 } from "lucide-react";
-import { Badge, Breadcrumbs, Button, Card, Chip, Input, ProgressBar, Separator, Surface, Table, Tabs, Toast } from "@heroui/react";
-import { useEffect, useState } from "react";
+import { Badge, Button, Card, Chip, ProgressBar, Separator, Surface, Table, Tabs, Toast } from "@heroui/react";
+import { liquidMetalFragmentShader, ShaderMount } from "@paper-design/shaders";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { Link, Route, Routes, useLocation, useNavigate } from "react-router";
-import { emailTemplates, leads as seedLeads, productProfile, proposals, research as seedResearch } from "./data/demoData";
-import { fetchApifyLeads, researchLead, understandLeadAsk } from "./lib/directus";
+import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router";
+import { emailTemplates, leads as demoLeads, productProfile, proposals, research as demoResearch } from "./data/demoData";
+import {
+  apiErrorMessage,
+  fetchApifyLeads,
+  fetchAdminLeads,
+  getAccount,
+  hasDirectus,
+  researchLead,
+  understandLeadAsk,
+} from "./lib/directus";
+import type { AdminLead } from "./lib/directus";
 import type { CompanyResearch, IntakeState, Lead } from "./types";
+import { LeadFlowVisual } from "./components/LeadFlowVisual";
+import { WaslaBrand } from "./components/WaslaBrand";
+import { AuthDialog } from "./components/AuthDialog";
+import { ProductTour } from "./components/ProductTour";
+import { CelebrationToast, EmptyWorkspace } from "./components/WorkspaceStates";
+import { AdminLeadExplorer } from "./components/AdminLeadExplorer";
+import { LegalPage } from "./components/LegalPage";
+import { accountToAuthUser } from "./lib/authUser";
+import type { AuthUser } from "./lib/authUser";
+import { LanguageToggle, useLanguage } from "./i18n";
 
 const navItems = [
-  { to: "/console", label: "Overview", icon: LayoutDashboard },
-  { to: "/console/lead-chat", label: "Lead Chat", icon: Bot },
-  { to: "/console/leads", label: "Leads", icon: Building2 },
-  { to: "/console/insights", label: "Insights", icon: BarChart3 },
-  { to: "/console/proposals", label: "Proposals", icon: FileText },
-  { to: "/console/email-templates", label: "Emails", icon: Mail },
+  { to: "/console", labelKey: "console.overview", icon: LayoutDashboard },
+  { to: "/console/agent", labelKey: "console.agent", icon: Sparkles },
+  { to: "/console/leads", labelKey: "console.leads", icon: Building2 },
+  { to: "/console/insights", labelKey: "console.insights", icon: BarChart3 },
+  { to: "/console/proposals", labelKey: "console.proposals", icon: FileText },
+  { to: "/console/email-templates", labelKey: "console.emails", icon: Mail },
 ];
-
-type AuthUser = {
-  id: string;
-  name: string;
-  business: string;
-  phone: string;
-  avatarTone: string;
-  verifiedPhone: boolean;
-  freeCreditSar: number;
-  createdAt: string;
-};
 
 const storedAuthKey = "waslah-auth-user";
 
-function createAvatarTone(name: string) {
-  const tones = ["cedar", "sky", "rose", "lime"];
-  const score = Array.from(name || "Waslah").reduce((sum, letter) => sum + letter.charCodeAt(0), 0);
-  return tones[score % tones.length];
-}
-
 function App() {
-  const [leads, setLeads] = useState(seedLeads);
-  const [research, setResearch] = useState(seedResearch);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [leads, setLeads] = useState<Lead[]>(demoLeads);
+  const [research, setResearch] = useState<CompanyResearch[]>(demoResearch);
   const [pendingLeadAsk, setPendingLeadAsk] = useState("ابغى عملاء مناسبين لخدمة وصلات المبيعات في الرياض");
+  const [authOpen, setAuthOpen] = useState(location.pathname === "/auth" || location.pathname === "/secure" || location.pathname === "/auth/social");
+  const [authMode, setAuthMode] = useState<"signup" | "login">("signup");
+  const [celebration, setCelebration] = useState<{ title: string; body: string } | null>(null);
+  const [routeLoading, setRouteLoading] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
   const [authUser, setAuthUser] = useState<AuthUser | null>(() => {
     const stored = localStorage.getItem(storedAuthKey);
     return stored ? JSON.parse(stored) as AuthUser : null;
@@ -77,95 +97,148 @@ function App() {
     }
   }, [authUser]);
 
+  useEffect(() => {
+    if (!hasDirectus) {
+      setAuthReady(true);
+      return;
+    }
+    getAccount()
+      .then((account) => setAuthUser(accountToAuthUser(account)))
+      .catch(() => setAuthUser(null))
+      .finally(() => setAuthReady(true));
+  }, []);
+
+  useEffect(() => {
+    if (location.pathname === "/auth" || location.pathname === "/secure" || location.pathname === "/auth/social") setAuthOpen(true);
+    setRouteLoading(true);
+    const timer = window.setTimeout(() => setRouteLoading(false), 360);
+    return () => window.clearTimeout(timer);
+  }, [location.pathname]);
+
+  function closeAuth() {
+    setAuthOpen(false);
+    if (location.pathname === "/auth" || location.pathname === "/secure" || location.pathname === "/auth/social") navigate("/");
+  }
+
+  function openAuth(mode: "signup" | "login" = "signup") {
+    setAuthMode(mode);
+    setAuthOpen(true);
+  }
+
+  function showCelebration(message: { title: string; body: string }) {
+    setCelebration(message);
+    window.setTimeout(() => setCelebration(null), 6500);
+  }
+
+  function enterWorkspace(user: AuthUser) {
+    setAuthUser(user);
+    setAuthReady(true);
+    navigate("/console");
+  }
+
   return (
-    <Routes>
-      <Route path="/" element={<LandingChat onLeadAsk={setPendingLeadAsk} />} />
-      <Route
-        path="/secure"
-        element={
-          <SecureLeadPage
-            initialAsk={pendingLeadAsk}
-            user={authUser}
-            onAuthChange={setAuthUser}
-            onLeadsFetched={(newLeads) => setLeads((current) => [...newLeads, ...current])}
-          />
-        }
-      />
-      <Route
-        path="/auth"
-        element={
-          <SecureLeadPage
-            initialAsk={pendingLeadAsk}
-            user={authUser}
-            onAuthChange={setAuthUser}
-            onLeadsFetched={(newLeads) => setLeads((current) => [...newLeads, ...current])}
-          />
-        }
-      />
-      <Route path="/console/*" element={<ConsoleShell user={authUser} leads={leads} research={research} setLeads={setLeads} setResearch={setResearch} />} />
-    </Routes>
+    <>
+      <div className={`route-loader${routeLoading ? " is-visible" : ""}`} aria-hidden="true"><span /></div>
+      <div className="page-transition" key={location.pathname}>
+        <Routes>
+          <Route path="/" element={<LandingChat user={authUser} onLeadAsk={setPendingLeadAsk} onAuthOpen={openAuth} />} />
+          <Route path="/secure" element={<LandingChat user={authUser} onLeadAsk={setPendingLeadAsk} onAuthOpen={openAuth} />} />
+          <Route path="/auth" element={<LandingChat user={authUser} onLeadAsk={setPendingLeadAsk} onAuthOpen={openAuth} />} />
+          <Route path="/auth/social" element={<LandingChat user={authUser} onLeadAsk={setPendingLeadAsk} onAuthOpen={openAuth} />} />
+          <Route path="/privacy" element={<LegalPage page="privacy" />} />
+          <Route path="/permissions" element={<LegalPage page="permissions" />} />
+          <Route path="/console/*" element={authReady
+            ? authUser
+              ? <ConsoleShell user={authUser} initialAsk={pendingLeadAsk} leads={leads} research={research} setLeads={setLeads} setResearch={setResearch} onAuthOpen={() => openAuth("signup")} />
+              : <Navigate to="/auth" replace />
+            : <ConsoleSessionLoading />} />
+        </Routes>
+      </div>
+      <AuthDialog initialMode={authMode} open={authOpen} user={authUser} onClose={closeAuth} onAuthenticated={(nextUser) => { setAuthUser(nextUser); setAuthReady(true); }} onCelebration={showCelebration} onReady={enterWorkspace} />
+      <CelebrationToast message={celebration} onClose={() => setCelebration(null)} />
+    </>
   );
+}
+
+function ConsoleSessionLoading() {
+  return <main className="console-session-loading"><WaslaBrand variant="symbol" inverse /><RefreshCw className="is-spinning" size={18} /><span>Securing workspace</span></main>;
 }
 
 function ConsoleShell({
   user,
+  initialAsk,
   leads,
   research,
   setLeads,
   setResearch,
+  onAuthOpen,
 }: {
   user: AuthUser | null;
+  initialAsk: string;
   leads: Lead[];
   research: CompanyResearch[];
   setLeads: Dispatch<SetStateAction<Lead[]>>;
   setResearch: Dispatch<SetStateAction<CompanyResearch[]>>;
+  onAuthOpen: (mode?: "signup" | "login") => void;
 }) {
+  const { direction, language, t } = useLanguage();
   const location = useLocation();
   const navigate = useNavigate();
   const initialTab = location.pathname.includes("leads")
     ? "leads"
-    : location.pathname.includes("insights")
-      ? "insights"
-      : location.pathname.includes("proposals")
-        ? "proposals"
-        : location.pathname.includes("email-templates")
-          ? "emails"
-          : location.pathname.includes("lead-chat")
-            ? "chat"
+    : location.pathname.includes("agent")
+      ? "agent"
+      : location.pathname.includes("insights")
+        ? "insights"
+        : location.pathname.includes("proposals")
+          ? "proposals"
+          : location.pathname.includes("email-templates")
+            ? "emails"
             : "overview";
   const [activeTab, setActiveTab] = useState(initialTab);
-  const [chatInput, setChatInput] = useState("");
+  const [chatInput, setChatInput] = useState(initialAsk);
   const [consoleMessages, setConsoleMessages] = useState([
-    { role: "assistant", text: "Tell me the lead segment. The console will turn it into a fetch-ready brief." },
+    { role: "assistant", text: language === "ar" ? "صف لي السوق، المدينة، وصانع القرار. سأحوّلها إلى مهمة واضحة قبل صرف أي رصيد." : "Describe the market, city, and decision maker. I will turn it into a clear mission before using any credit." },
   ]);
   const [intake, setIntake] = useState<IntakeState>({
     confidence: 0,
-    summary: "Waiting for target criteria.",
-    missing: ["target industry", "location or market", "buyer role or decision maker"],
+    summary: language === "ar" ? "بانتظار معايير العميل المطلوب." : "Waiting for target criteria.",
+    missing: language === "ar" ? ["القطاع المستهدف", "المدينة أو السوق", "صانع القرار"] : ["target industry", "location or market", "buyer role or decision maker"],
     apifyActor: "",
     apifyInput: {},
   });
   const [busy, setBusy] = useState(false);
+  const [tourOpen, setTourOpen] = useState(false);
+  const [leadRunTick, setLeadRunTick] = useState(0);
+  const [workspaceStarted, setWorkspaceStarted] = useState(() => Boolean(user?.isAdmin || (user && window.localStorage.getItem(`wasla:first-request:${user.id}`))));
 
-  const pipeline = buildPipeline(leads);
-  const byIndustry = buildIndustryData(leads);
-  const avgFit = Math.round(leads.reduce((sum, lead) => sum + lead.fitScore, 0) / leads.length);
+  const avgFit = leads.length ? Math.round(leads.reduce((sum, lead) => sum + lead.fitScore, 0) / leads.length) : 0;
   const potential = leads.reduce((sum, lead) => sum + lead.revenueEstimate, 0);
-  const activeResearch = research[0];
   const tabLabels: Record<string, string> = {
-    overview: "Overview",
-    chat: "Lead Chat",
-    leads: "Leads",
-    insights: "Insights",
-    proposals: "Proposals",
-    emails: "Email Templates",
+    overview: t("console.overview"),
+    agent: t("console.agent"),
+    leads: user?.isAdmin ? (language === "ar" ? "مخزون العملاء" : "Lead inventory") : t("console.leads"),
+    insights: t("console.insights"),
+    proposals: t("console.proposals"),
+    emails: t("console.emails"),
   };
+  const onboardingSteps = language === "ar" ? [
+    { target: "agent", eyebrow: "1 من 4 · ابدأ من هنا", title: "صف العميل كما تصفه لزميلك", body: "اكتب القطاع والمدينة وصانع القرار. الوكيل يسألك فقط عن المعلومة الناقصة قبل تشغيل أي مصدر مدفوع." },
+    { target: "pipeline", eyebrow: "2 من 4 · مسار واضح", title: "راقب كل مرحلة، لا صندوقاً أسود", body: "كل مهمة تمر بالفهم والجمع والتنقية والاتصال والتأهيل ثم كشف البيانات. الحالة محفوظة في Directus." },
+    { target: "wallet", eyebrow: "3 من 4 · تحكم بالتكلفة", title: "رصيدك تحت سيطرتك", body: "رصيد البداية 30 ر.س يظهر هنا. لا تُكشف بيانات أي عميل ولا يُخصم رصيد من دون استحقاق واضح." },
+    { target: "leads", eyebrow: "4 من 4 · النتيجة", title: "العملاء المؤهلون يعيشون هنا", body: "افتح سجل العميل لترى سبب التأهيل، ملخص المكالمة، الإجابات المنظمة، والخطوة التالية المقترحة." },
+  ] : [
+    { target: "agent", eyebrow: "1 of 4 · Start here", title: "Describe the buyer like you would to a colleague", body: "Name the industry, city, and decision maker. The agent asks only for missing criteria before using paid sources." },
+    { target: "pipeline", eyebrow: "2 of 4 · Clear workflow", title: "See every stage, not a black box", body: "Each mission moves through understanding, sourcing, refinement, calling, qualification, and reveal. Directus stores every state." },
+    { target: "wallet", eyebrow: "3 of 4 · Cost control", title: "Keep your credit under control", body: "Your 30 SAR welcome credit appears here. Lead details are revealed only when the result is useful and eligible." },
+    { target: "leads", eyebrow: "4 of 4 · The outcome", title: "Qualified leads live here", body: "Open a lead to see why they qualified, the call summary, structured answers, and the recommended next step." },
+  ];
 
   function selectTab(key: string) {
     setActiveTab(key);
     const paths: Record<string, string> = {
       overview: "/console",
-      chat: "/console/lead-chat",
+      agent: "/console/agent",
       leads: "/console/leads",
       insights: "/console/insights",
       proposals: "/console/proposals",
@@ -174,13 +247,79 @@ function ConsoleShell({
     navigate(paths[key] ?? "/console");
   }
 
+  function startNewChat() {
+    setChatInput("");
+    setConsoleMessages([
+      {
+        role: "assistant",
+        text: language === "ar"
+          ? "صف لي السوق والمدينة وصانع القرار. سأفهم المطلوب معك ثم أبدأ بجلب العملاء."
+          : "Tell me the market, location, and decision maker. I’ll shape the brief with you, then start finding leads.",
+      },
+    ]);
+    setIntake({
+      confidence: 0,
+      summary: language === "ar" ? "بانتظار معايير العميل المطلوب." : "Waiting for target criteria.",
+      missing: language === "ar" ? ["القطاع المستهدف", "المدينة أو السوق", "صانع القرار"] : ["target industry", "location or market", "buyer role or decision maker"],
+      apifyActor: "",
+      apifyInput: {},
+    });
+    setLeadRunTick(0);
+    selectTab("agent");
+    window.setTimeout(() => document.querySelector<HTMLInputElement>(".ops-chat-composer input")?.focus(), 100);
+  }
+
+  function focusWorkspaceSearch() {
+    if (user?.isAdmin) {
+      selectTab("leads");
+      window.setTimeout(() => document.querySelector<HTMLInputElement>(".admin-inventory__search input")?.focus(), 80);
+      return;
+    }
+    selectTab("agent");
+    window.setTimeout(() => document.querySelector<HTMLInputElement>(".ops-chat-composer input")?.focus(), 80);
+  }
+
+  const syncAdminInventory = useCallback((items: AdminLead[]) => {
+    setLeads(items.map(adminLeadToLead));
+  }, [setLeads]);
+
+  useEffect(() => {
+    if (!user?.isAdmin) return;
+    fetchAdminLeads({ limit: 100, sort: "enrichment_score" })
+      .then((result) => syncAdminInventory(result.data))
+      .catch(() => undefined);
+  }, [syncAdminInventory, user?.isAdmin]);
+
+  useEffect(() => {
+    if (!user?.verifiedPhone) return;
+    const onboardingKey = `wasla:onboarding:${user.id}`;
+    if (window.localStorage.getItem(onboardingKey) !== "pending") return;
+    const timer = window.setTimeout(() => setTourOpen(true), 650);
+    return () => window.clearTimeout(timer);
+  }, [user]);
+
+  useEffect(() => {
+    const focusMissionSearch = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "k") return;
+      event.preventDefault();
+      focusWorkspaceSearch();
+    };
+    window.addEventListener("keydown", focusMissionSearch);
+    return () => window.removeEventListener("keydown", focusMissionSearch);
+  });
+
+  function completeTour() {
+    if (user) window.localStorage.setItem(`wasla:onboarding:${user.id}`, "complete");
+    setTourOpen(false);
+  }
+
   async function sendConsoleMessage(text = chatInput) {
     if (!text.trim() || busy) return;
     const nextMessages = [...consoleMessages, { role: "user", text }];
     setConsoleMessages(nextMessages);
     setChatInput("");
     setBusy(true);
-    Toast.toast.info("Analyzing lead criteria...");
+    Toast.toast.info(language === "ar" ? "جارٍ تحليل معايير العملاء..." : "Analyzing lead criteria...");
     const result = await understandLeadAsk(text, nextMessages.map((message) => `${message.role}: ${message.text}`));
     setIntake(result);
     setConsoleMessages([
@@ -188,70 +327,93 @@ function ConsoleShell({
       {
         role: "assistant",
         text: result.confidence === 100
-          ? `Ready: ${result.summary}`
-          : `Still missing ${result.missing.join(", ")}.`,
+          ? (language === "ar" ? `المهمة جاهزة: ${result.summary}` : `Ready: ${result.summary}`)
+          : (language === "ar" ? `ما زلنا نحتاج: ${result.missing.join("، ")}.` : `Still missing ${result.missing.join(", ")}.`),
       },
     ]);
-    Toast.toast.success(result.confidence === 100 ? "Lead brief is ready" : "Lead brief updated");
+    Toast.toast.success(result.confidence === 100 ? (language === "ar" ? "موجز المهمة جاهز" : "Lead brief is ready") : (language === "ar" ? "تم تحديث الموجز" : "Lead brief updated"));
     setBusy(false);
   }
 
   async function runConsoleFetch() {
+    if (user?.isAdmin) {
+      focusWorkspaceSearch();
+      return;
+    }
+    if (!user?.verifiedPhone) {
+      onAuthOpen();
+      return;
+    }
+    if (intake.confidence < 100) {
+      Toast.toast.info("أكمل القطاع والمدينة وصانع القرار أولاً.");
+      return;
+    }
+    setLeadRunTick((current) => current + 1);
     setBusy(true);
-    Toast.toast.info("Starting capped lead fetch...");
-    const fetched = await fetchApifyLeads(intake);
-    setLeads((current) => [...fetched, ...current]);
-    Toast.toast.success(fetched.length ? `Added ${fetched.length} leads` : "Fetch is ready. Connect Directus/Apify to run live.");
-    setBusy(false);
+    Toast.toast.info(language === "ar" ? "جارٍ تشغيل مهمة العملاء..." : "Starting lead mission...");
+    try {
+      const fetched = await fetchApifyLeads(intake);
+      setLeads((current) => [...fetched, ...current]);
+      window.localStorage.setItem(`wasla:first-request:${user.id}`, "created");
+      setWorkspaceStarted(true);
+      Toast.toast.success(fetched.length ? (language === "ar" ? `تمت إضافة ${fetched.length} عملاء` : `Added ${fetched.length} leads`) : hasDirectus ? (language === "ar" ? "تم حفظ المهمة في Directus وإرسالها لمسار التنفيذ" : "Mission stored in Directus and sent to the execution workflow") : (language === "ar" ? "اربط Directus وApify للتشغيل الفعلي" : "Connect Directus and Apify to run live"));
+    } catch (error) {
+      Toast.toast.danger(apiErrorMessage(error, language === "ar" ? "تعذر بدء المهمة." : "Could not start the mission."));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function handleResearch(lead: Lead) {
     setBusy(true);
-    Toast.toast.info(`Researching ${lead.company}...`);
+    Toast.toast.info(language === "ar" ? `جارٍ بحث ${lead.company}...` : `Researching ${lead.company}...`);
     const entry = await researchLead(lead, productProfile.description) as CompanyResearch;
     setResearch((current) => [entry, ...current.filter((item) => item.leadId !== entry.leadId)]);
-    Toast.toast.success(`Research updated for ${lead.company}`);
+    Toast.toast.success(language === "ar" ? `تم تحديث بحث ${lead.company}` : `Research updated for ${lead.company}`);
     setBusy(false);
   }
 
   return (
     <>
       <Toast.Provider placement="top end" />
-      <main className="hconsole">
+      <main className={`hconsole${language === "ar" ? " is-arabic" : ""}`} dir={direction}>
         <Surface className="hconsole-shell">
           <Card className="hconsole-sidebar">
             <Card.Content>
               <Link to="/" className="hconsole-brand">
-                <span>W</span>
-                <div><strong>Waslah</strong><small>AI Lead CRM</small></div>
+                <WaslaBrand variant="horizontal" inverse />
+                <small>{language === "ar" ? "عمليات العملاء" : "Lead Operations"}</small>
               </Link>
+              <LanguageToggle inverse />
+              <button className="hconsole-sidebar-search" onClick={focusWorkspaceSearch}>
+                <Search size={15} />
+                <span>{language === "ar" ? "ابحث في المساحة" : "Search workspace"}</span>
+                <kbd><Command size={11} /> K</kbd>
+              </button>
               <Separator />
               <div className="hconsole-nav">
                 {navItems.map((item) => {
-                  const key = item.to.split("/").at(-1) === "console" ? "overview" : item.to.split("/").at(-1)?.replace("email-templates", "emails").replace("lead-chat", "chat") ?? "overview";
+                  const key = item.to.split("/").at(-1) === "console" ? "overview" : item.to.split("/").at(-1)?.replace("email-templates", "emails") ?? "overview";
                   const Icon = item.icon;
                   return (
-                    <Button key={item.to} variant={activeTab === key ? "primary" : "secondary"} onClick={() => selectTab(key)} className="hconsole-nav-button">
-                      <Icon size={17} /> {item.label}
+                    <Button key={item.to} data-tour={key === "leads" ? "leads" : key === "agent" ? "agent" : undefined} variant={activeTab === key ? "primary" : "secondary"} onClick={() => key === "agent" ? startNewChat() : selectTab(key)} className="hconsole-nav-button">
+                      <Icon size={17} /> {user?.isAdmin && key === "leads" ? (language === "ar" ? "مخزون العملاء" : "Lead inventory") : t(item.labelKey)}
                     </Button>
                   );
                 })}
               </div>
-              <Card className="hconsole-credit-card">
-                <Card.Header>
-                  <Card.Title>{user?.verifiedPhone ? "Verified wallet" : "Free limits"}</Card.Title>
-                  <Badge><Badge.Label>{user?.verifiedPhone ? `${user.freeCreditSar} SAR` : "30 SAR"}</Badge.Label></Badge>
-                </Card.Header>
-                <Card.Content>
-                  <p>{user?.verifiedPhone ? "Phone verified. The welcome credit is active on this account." : "20 leads per fetch. 30 free lead credits after phone verification."}</p>
-                </Card.Content>
-              </Card>
+              <div className="hconsole-credit-card" data-tour="wallet">
+                <div><WalletCards size={15} /><span>{language === "ar" ? "الرصيد المتاح" : "Available credit"}</span></div>
+                <strong>{user?.verifiedPhone ? user.freeCreditSar : 30}<small>{language === "ar" ? "ر.س" : "SAR"}</small></strong>
+                <span className="hconsole-credit-card__status"><i /> {user?.verifiedPhone ? (language === "ar" ? "محفظة موثقة" : "Verified wallet") : (language === "ar" ? "يوثّق بعد التسجيل" : "Unlocks after signup")}</span>
+              </div>
               <div className="hconsole-profile-card">
                 <AvatarMark user={user} />
                 <div>
-                  <strong>{user?.name ?? "Guest workspace"}</strong>
-                  <small>{user?.verifiedPhone ? "Phone verified" : "Create an account to unlock credit"}</small>
+                  <strong>{user?.name ?? (language === "ar" ? "مساحة ضيف" : "Guest workspace")}</strong>
+                  <small>{user?.business ?? (language === "ar" ? "وصلة التجريبية" : "Wasla demo")}</small>
                 </div>
+                <button aria-label={language === "ar" ? "إعدادات الحساب" : "Account settings"} data-tooltip={language === "ar" ? "الإعدادات" : "Settings"} onClick={() => Toast.toast.info(language === "ar" ? "إعدادات الحساب قيد التجهيز" : "Account settings are being prepared")}><Settings size={15} /></button>
               </div>
             </Card.Content>
           </Card>
@@ -259,104 +421,168 @@ function ConsoleShell({
           <section className="hconsole-main">
             <Card className="hconsole-topbar">
               <Card.Content>
-                <Breadcrumbs>
-                  <Breadcrumbs.Item href="/">Waslah</Breadcrumbs.Item>
-                  <Breadcrumbs.Item href="/console">Console</Breadcrumbs.Item>
-                  <Breadcrumbs.Item>{tabLabels[activeTab] ?? "Overview"}</Breadcrumbs.Item>
-                </Breadcrumbs>
+                <div className="hconsole-context">
+                  <span><CircleDot size={12} /> {user?.business ?? (language === "ar" ? "مساحة وصلة" : "Wasla workspace")}</span>
+                  <strong>{tabLabels[activeTab] ?? "Overview"}</strong>
+                </div>
                 <div className="hconsole-actions">
-                  <Chip><Chip.Label>{avgFit}% avg fit</Chip.Label></Chip>
-                  <Chip><Chip.Label>{user?.verifiedPhone ? `${user.freeCreditSar} SAR wallet` : "Guest mode"}</Chip.Label></Chip>
-                  <Button variant="secondary" onClick={() => Toast.toast.info("Console saved as draft")}>Save view</Button>
-                  <Button onClick={runConsoleFetch} isDisabled={busy || intake.confidence < 100}><Search size={16} /> Fetch 20</Button>
+                  <button className="hconsole-icon-button" aria-label={language === "ar" ? "الإشعارات" : "Notifications"} data-tooltip={language === "ar" ? "الإشعارات" : "Notifications"}><Bell size={16} /><i /></button>
+                  <span className="hconsole-health"><i /> {language === "ar" ? "الأنظمة تعمل" : "Systems operational"}</span>
+                  {!user && <Button variant="secondary" onClick={() => onAuthOpen("signup")}>{language === "ar" ? "إنشاء حساب" : "Create account"}</Button>}
+                  <Button onClick={user?.isAdmin ? focusWorkspaceSearch : startNewChat}>{user?.isAdmin ? <Search size={16} /> : <Plus size={16} />} {user?.isAdmin ? (language === "ar" ? "بحث العملاء" : "Search leads") : t("console.agent")}<ChevronDown size={14} /></Button>
                 </div>
               </Card.Content>
             </Card>
 
             <Tabs selectedKey={activeTab} onSelectionChange={(key) => selectTab(String(key))} className="hconsole-tabs">
               <Tabs.ListContainer>
-                <Tabs.List aria-label="Console sections">
-                  <Tabs.Tab id="overview">Overview<Tabs.Indicator /></Tabs.Tab>
-                  <Tabs.Tab id="chat">Lead Chat<Tabs.Indicator /></Tabs.Tab>
-                  <Tabs.Tab id="leads">Leads<Tabs.Indicator /></Tabs.Tab>
-                  <Tabs.Tab id="insights">Insights<Tabs.Indicator /></Tabs.Tab>
-                  <Tabs.Tab id="proposals">Proposals<Tabs.Indicator /></Tabs.Tab>
-                  <Tabs.Tab id="emails">Emails<Tabs.Indicator /></Tabs.Tab>
+                  <Tabs.List aria-label="Console sections">
+                  <Tabs.Tab id="overview">{t("console.overview")}<Tabs.Indicator /></Tabs.Tab>
+                  <Tabs.Tab id="agent">{t("console.agent")}<Tabs.Indicator /></Tabs.Tab>
+                  <Tabs.Tab id="leads">{t("console.leads")}<Tabs.Indicator /></Tabs.Tab>
+                  <Tabs.Tab id="insights">{t("console.insights")}<Tabs.Indicator /></Tabs.Tab>
+                  <Tabs.Tab id="proposals">{t("console.proposals")}<Tabs.Indicator /></Tabs.Tab>
+                  <Tabs.Tab id="emails">{t("console.emails")}<Tabs.Indicator /></Tabs.Tab>
                 </Tabs.List>
               </Tabs.ListContainer>
 
               <Tabs.Panel id="overview">
-                <div className="hconsole-metrics">
-                  <HeroUIMetric icon={Target} label="Average fit" value={`${avgFit}%`} />
-                  <HeroUIMetric icon={BriefcaseBusiness} label="Pipeline value" value={money(potential)} />
-                  <HeroUIMetric icon={Search} label="Research coverage" value={`${Math.round((research.length / leads.length) * 100)}%`} />
-                  <HeroUIMetric icon={Mail} label="Email templates" value="3 free" />
-                </div>
-                <div className="hconsole-grid two">
-                  <HeroUIBars title="Pipeline by status" items={pipeline.map((item) => ({ label: item.status, value: item.count * 25 }))} />
-                  <HeroUIBars title="Industry mix" items={byIndustry.map((item) => ({ label: item.name, value: item.value * 25 }))} />
-                </div>
-                <Card className="hconsole-card">
-                  <Card.Header><Card.Title>Best next actions</Card.Title></Card.Header>
-                  <Card.Content className="hconsole-chip-list">
-                    <Chip><Chip.Label>Research Nakhla Clinics again</Chip.Label></Chip>
-                    <Chip><Chip.Label>Move BluePalm proposal to review</Chip.Label></Chip>
-                    <Chip><Chip.Label>Clarify ICP before next Apify run</Chip.Label></Chip>
-                  </Card.Content>
-                </Card>
-              </Tabs.Panel>
+                <div className="ops-dashboard">
+                  <header className="ops-dashboard__heading">
+                    <div>
+                      <span><Activity size={14} /> {language === "ar" ? "غرفة عمليات العملاء" : "Lead operations room"}</span>
+                      <h1>{language === "ar" ? "لوحة التحكم" : "Dashboard"}</h1>
+                      <p>{language === "ar" ? "راقب البحث والتأهيل والاتصال من مكان واحد." : "Monitor sourcing, qualification, and outreach from one place."}</p>
+                    </div>
+                  </header>
 
-              <Tabs.Panel id="chat">
-                <div className="hconsole-grid two">
-                  <Card className="hconsole-card">
-                    <Card.Header>
-                      <Card.Title>Lead Discovery Chat</Card.Title>
-                      <Card.Description>The assistant clarifies before credits are spent.</Card.Description>
-                    </Card.Header>
-                    <Card.Content>
-                      <div className="hconsole-chat-log">
-                        {consoleMessages.map((message, index) => (
-                          <Card key={index} className={`hconsole-bubble ${message.role}`}>
-                            <Card.Content>{message.text}</Card.Content>
-                          </Card>
+                  <section className="ops-command-grid is-overview">
+                    <div className="ops-panel ops-agent-launch" data-tour="agent">
+                      <div className="ops-panel__head">
+                        <div><Sparkles size={15} /><span>{t("console.agent")}</span></div>
+                        <span className="ops-live"><i /> {language === "ar" ? "جاهز" : "Ready"}</span>
+                      </div>
+                      <div>
+                        <h2>{language === "ar" ? "ابدأ محادثة، ثم شاهد العملاء يصلون." : "Start a conversation, then watch the leads arrive."}</h2>
+                        <p>{language === "ar" ? "اكتب طلبك بطريقتك. المحادثة تضبط المعايير، ثم يظهر جدول العملاء واحداً بعد الآخر أثناء البحث." : "Ask in your own words. The chat sharpens the criteria, then reveals leads one by one while research runs."}</p>
+                      </div>
+                      <button onClick={startNewChat}>{t("console.agent")} {language === "ar" ? <ArrowLeft size={15} /> : <ArrowRight size={15} />}</button>
+                    </div>
+
+                    <div className="ops-panel ops-usage" data-tour="wallet">
+                      <div className="ops-panel__head"><div><WalletCards size={15} /><span>{language === "ar" ? "الاستخدام" : "Usage"}</span></div><small>{language === "ar" ? "أغسطس 2026" : "August 2026"}</small></div>
+                      <strong>{user?.verifiedPhone ? user.freeCreditSar : 30}<small>{language === "ar" ? " ر.س" : " SAR"}</small></strong>
+                      <p>{language === "ar" ? "الرصيد المتاح" : "Available balance"}</p>
+                      <div className="ops-usage__chart" aria-hidden="true">{Array.from({ length: 42 }, (_, index) => <i key={index} className={index < 15 ? "is-used" : ""} />)}</div>
+                      <footer><span>{language === "ar" ? "5.75 ر.س مستخدمة" : "5.75 SAR used"}</span>{language === "ar" ? <ArrowUpLeft size={14} /> : <ArrowUpRight size={14} />}</footer>
+                    </div>
+
+                    <div className="ops-panel ops-system">
+                      <div className="ops-panel__head"><div><Zap size={15} /><span>{language === "ar" ? "محرك التأهيل" : "Qualification engine"}</span></div>{language === "ar" ? <ArrowUpLeft size={14} /> : <ArrowUpRight size={14} />}</div>
+                      <h2>{language === "ar" ? "المصادر، الاتصال، وDirectus متصلة." : "Sourcing, calling, and Directus are connected."}</h2>
+                      <div className="ops-system__services">
+                        <span><Database size={14} /> Directus <i /></span>
+                        <span><Search size={14} /> Apify <i /></span>
+                        <span><PhoneCall size={14} /> Vapi <i /></span>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="ops-work-grid">
+                    <div className="ops-panel ops-recent">
+                      <div className="ops-panel__head"><div><Clock3 size={15} /><span>{language === "ar" ? "آخر نشاط" : "Recent activity"}</span></div><button onClick={() => selectTab("leads")}>{language === "ar" ? "عرض الكل" : "View all"}{language === "ar" ? <ArrowUpLeft size={13} /> : <ArrowUpRight size={13} />}</button></div>
+                      <div className="ops-recent__grid">
+                        {leads.slice(0, 4).map((lead, index) => (
+                          <button key={lead.id} onClick={() => selectTab("leads")}>
+                            <span className="ops-company-mark">{lead.company.slice(0, 1)}</span>
+                            <span><strong>{lead.company}</strong><small>{lead.industry} · {lead.location.split(",")[0]}</small></span>
+                            <span className={`ops-status is-${lead.status}`}><i /> {leadStatusLabel(lead.status, language)}</span>
+                            <small>{index + 2}{language === "ar" ? "س" : "h"}</small>
+                            {language === "ar" ? <ArrowUpLeft size={14} /> : <ArrowUpRight size={14} />}
+                          </button>
                         ))}
                       </div>
-                      <div className="hconsole-input-row">
-                        <Input value={chatInput} onChange={(event) => setChatInput(event.target.value)} onKeyDown={(event) => event.key === "Enter" && sendConsoleMessage()} placeholder="Example: clinic owners in Riyadh with outdated follow-up" />
-                        <Button onClick={() => sendConsoleMessage()} isDisabled={busy}><Send size={16} /> Send</Button>
+                    </div>
+
+                    <div className="ops-panel ops-queue">
+                      <div className="ops-panel__head"><div><PhoneCall size={15} /><span>{language === "ar" ? "قائمة التأهيل" : "Qualification queue"}</span></div><span className="ops-count">{leads.length}</span></div>
+                      <div className="ops-queue__list">
+                        {leads.slice(0, 3).map((lead, index) => (
+                          <div key={lead.id}>
+                            <span>{String(index + 1).padStart(2, "0")}</span>
+                            <div><strong>{lead.name}</strong><small>{lead.title} · {lead.company}</small></div>
+                            <b>{lead.fitScore}%</b>
+                          </div>
+                        ))}
                       </div>
-                    </Card.Content>
-                  </Card>
-                  <Card className="hconsole-card">
-                    <Card.Header><Card.Title>Apify readiness</Card.Title></Card.Header>
-                    <Card.Content className="hconsole-progress-stack">
-                      <ProgressBar value={intake.confidence} maxValue={100} aria-label="Apify readiness">
-                        <ProgressBar.Track><ProgressBar.Fill /></ProgressBar.Track>
-                      </ProgressBar>
-                      <strong>{intake.confidence}% understood</strong>
-                      <p>{intake.summary}</p>
-                      <div className="hconsole-chip-list">
-                        {(intake.missing.length ? intake.missing : ["Ready to fetch"]).map((item) => <Chip key={item}><Chip.Label>{item}</Chip.Label></Chip>)}
-                      </div>
-                      <Button onClick={runConsoleFetch} isDisabled={busy || intake.confidence < 100}><RefreshCw size={16} /> Start Apify fetch</Button>
-                    </Card.Content>
-                  </Card>
+                      <button className="ops-queue__action" onClick={() => selectTab("leads")}>{language === "ar" ? "فتح قائمة العملاء" : "Open lead queue"}{language === "ar" ? <ArrowLeft size={14} /> : <ArrowRight size={14} />}</button>
+                    </div>
+                  </section>
+
+                  {user && !workspaceStarted ? (
+                    <EmptyWorkspace onStart={focusWorkspaceSearch} />
+                  ) : (
+                    <section className="ops-metrics" data-tour="pipeline">
+                      <div><Target size={16} /><span>{language === "ar" ? "متوسط الملاءمة" : "Average fit"}</span><strong>{avgFit}%</strong><small>+8.4%</small></div>
+                      <div><BriefcaseBusiness size={16} /><span>{language === "ar" ? "قيمة الفرص" : "Pipeline value"}</span><strong>{money(potential)}</strong><small>+12.7%</small></div>
+                      <div><Search size={16} /><span>{language === "ar" ? "تغطية البحث" : "Research coverage"}</span><strong>{leads.length ? Math.round((research.length / leads.length) * 100) : 0}%</strong><small>+4.1%</small></div>
+                      <div><BadgeCheck size={16} /><span>{language === "ar" ? "المؤهلون" : "Qualified"}</span><strong>{leads.filter((lead) => lead.status === "qualified").length}</strong><small>{language === "ar" ? "هذا الشهر" : "this month"}</small></div>
+                    </section>
+                  )}
+
+                  <section className="ops-panel ops-pipeline" data-tour="pipeline">
+                    <div className="ops-panel__head"><div><Activity size={15} /><span>{language === "ar" ? "مسار المهمة" : "Mission pipeline"}</span></div><span className="ops-live"><i /> {t("console.systemsReady")}</span></div>
+                    <LeadFlowVisual compact />
+                  </section>
+
+                  <section className="ops-panel ops-runs" data-tour="leads">
+                    <div className="ops-panel__head"><div><Database size={15} /><span>{language === "ar" ? "سجل العملاء" : "Lead activity"}</span></div><button onClick={() => selectTab("leads")}>{language === "ar" ? "عرض كل العملاء" : "View all leads"}{language === "ar" ? <ArrowUpLeft size={13} /> : <ArrowUpRight size={13} />}</button></div>
+                    <div className="ops-runs__table">
+                      <div className="ops-runs__row is-head"><span>{language === "ar" ? "الحالة" : "Status"}</span><span>{language === "ar" ? "العميل" : "Lead"}</span><span>{language === "ar" ? "الشركة" : "Company"}</span><span>{language === "ar" ? "الملاءمة" : "Fit"}</span><span>{language === "ar" ? "المصدر" : "Source"}</span><span /></div>
+                      {leads.map((lead) => (
+                        <button className="ops-runs__row" key={lead.id} onClick={() => selectTab("leads")}>
+                          <span className={`ops-status is-${lead.status}`}><i /> {leadStatusLabel(lead.status, language)}</span>
+                          <span><strong>{lead.name}</strong><small>{lead.title}</small></span>
+                          <span>{lead.company}</span>
+                          <span><b>{lead.fitScore}%</b></span>
+                          <span>{lead.source.replace("Apify ", "")}</span>
+                          <span>{language === "ar" ? <ArrowUpLeft size={14} /> : <ArrowUpRight size={14} />}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
                 </div>
+              </Tabs.Panel>
+
+              <Tabs.Panel id="agent">
+                <AgentMissionPage
+                  busy={busy}
+                  chatInput={chatInput}
+                  consoleMessages={consoleMessages}
+                  intake={intake}
+                  language={language}
+                  leads={leads}
+                  leadRunTick={leadRunTick}
+                  onInputChange={setChatInput}
+                  onRun={runConsoleFetch}
+                  onSend={sendConsoleMessage}
+                  user={user}
+                />
               </Tabs.Panel>
 
               <Tabs.Panel id="leads">
-                <Card className="hconsole-card">
-                  <Card.Header><Card.Title>Leads</Card.Title><Card.Description>Research, email, and move each account toward a proposal.</Card.Description></Card.Header>
+                {user?.isAdmin ? <AdminLeadExplorer onInventoryLoaded={syncAdminInventory} /> : <Card className="hconsole-card">
+                  <Card.Header><Card.Title>{t("console.leads")}</Card.Title><Card.Description>{language === "ar" ? "ابحث، تواصل، وانقل كل عميل نحو العرض المناسب." : "Research, email, and move each account toward a proposal."}</Card.Description></Card.Header>
                   <Card.Content>
                     <Table className="hconsole-table">
                       <Table.ScrollContainer>
                         <Table.Content aria-label="Leads">
                           <Table.Header>
-                            <Table.Column isRowHeader>Lead</Table.Column>
-                            <Table.Column>Company</Table.Column>
-                            <Table.Column>Fit</Table.Column>
-                            <Table.Column>Status</Table.Column>
-                            <Table.Column>Actions</Table.Column>
+                            <Table.Column isRowHeader>{language === "ar" ? "العميل" : "Lead"}</Table.Column>
+                            <Table.Column>{language === "ar" ? "الشركة" : "Company"}</Table.Column>
+                            <Table.Column>{language === "ar" ? "الملاءمة" : "Fit"}</Table.Column>
+                            <Table.Column>{language === "ar" ? "الحالة" : "Status"}</Table.Column>
+                            <Table.Column>{language === "ar" ? "إجراءات" : "Actions"}</Table.Column>
                           </Table.Header>
                           <Table.Body>
                             {leads.map((lead) => (
@@ -365,7 +591,7 @@ function ConsoleShell({
                                 <Table.Cell><strong>{lead.company}</strong><small>{lead.industry} · {lead.location}</small></Table.Cell>
                                 <Table.Cell><ProgressBar value={lead.fitScore} maxValue={100} aria-label={`${lead.company} fit`}><ProgressBar.Track><ProgressBar.Fill /></ProgressBar.Track></ProgressBar></Table.Cell>
                                 <Table.Cell><Chip><Chip.Label>{lead.status}</Chip.Label></Chip></Table.Cell>
-                                <Table.Cell><Button variant="secondary" onClick={() => handleResearch(lead)} isDisabled={busy}><Search size={15} /> Research</Button></Table.Cell>
+                                <Table.Cell><Button variant="secondary" onClick={() => handleResearch(lead)} isDisabled={busy}><Search size={15} /> {language === "ar" ? "بحث" : "Research"}</Button></Table.Cell>
                               </Table.Row>
                             ))}
                           </Table.Body>
@@ -373,27 +599,19 @@ function ConsoleShell({
                       </Table.ScrollContainer>
                     </Table>
                   </Card.Content>
-                </Card>
+                </Card>}
               </Tabs.Panel>
 
               <Tabs.Panel id="insights">
-                <div className="hconsole-grid two">
-                  <HeroUIBars title="Lead comparison by fit" items={leads.map((lead) => ({ label: lead.company, value: lead.fitScore }))} />
-                  <Card className="hconsole-card">
-                    <Card.Header><Card.Title>AI insight</Card.Title><Card.Description>{activeResearch?.companySlug ?? "demo analysis"}</Card.Description></Card.Header>
-                    <Card.Content className="hconsole-chip-list">
-                      {(activeResearch?.opportunities ?? ["Healthcare and logistics show the strongest near-term segment", "Recent updates improve outreach timing", "Fit above 80 should move to proposal"]).map((item) => <Chip key={item}><Chip.Label>{item}</Chip.Label></Chip>)}
-                    </Card.Content>
-                  </Card>
-                </div>
+                <InsightDashboard leads={leads} research={research} language={language} />
               </Tabs.Panel>
 
               <Tabs.Panel id="proposals">
-                <Card className="hconsole-card">
-                  <Card.Header><Card.Title>{proposals[0].title}</Card.Title><Card.Description>{leads.find((lead) => lead.id === proposals[0].leadId)?.company ?? leads[0].company}</Card.Description></Card.Header>
+                  <Card className="hconsole-card">
+                    <Card.Header><Card.Title>{proposals[0].title}</Card.Title><Card.Description>{leads.find((lead) => lead.id === proposals[0].leadId)?.company ?? leads[0]?.company ?? "-"}</Card.Description></Card.Header>
                   <Card.Content className="hconsole-proposal">
                     <p>{proposals[0].generatedCopy}</p>
-                    <div className="hconsole-actions"><Chip><Chip.Label>{money(proposals[0].value)}</Chip.Label></Chip><Button onClick={() => Toast.toast.success("Proposal queued for review")}>Queue review</Button></div>
+                    <div className="hconsole-actions"><Chip><Chip.Label>{money(proposals[0].value)}</Chip.Label></Chip><Button onClick={() => Toast.toast.success(language === "ar" ? "تم إرسال العرض للمراجعة" : "Proposal queued for review")}>{language === "ar" ? "إرسال للمراجعة" : "Queue review"}</Button></div>
                   </Card.Content>
                 </Card>
               </Tabs.Panel>
@@ -404,13 +622,13 @@ function ConsoleShell({
                     <Card className="hconsole-card" key={template.id}>
                       <Card.Header>
                         <Card.Title>{template.name}</Card.Title>
-                        {template.isPremium ? <Badge><Badge.Label>Premium</Badge.Label></Badge> : <Badge><Badge.Label>Free</Badge.Label></Badge>}
+                        {template.isPremium ? <Badge><Badge.Label>{language === "ar" ? "مدفوع" : "Premium"}</Badge.Label></Badge> : <Badge><Badge.Label>{language === "ar" ? "مجاني" : "Free"}</Badge.Label></Badge>}
                       </Card.Header>
                       <Card.Content>
                         <p>{template.subject}</p>
                         <ProgressBar value={template.performanceScore} maxValue={100} aria-label={`${template.name} performance`}><ProgressBar.Track><ProgressBar.Fill /></ProgressBar.Track></ProgressBar>
                       </Card.Content>
-                      <Card.Footer><Button isDisabled={template.isPremium} onClick={() => Toast.toast.success(`${template.name} selected`)}>{template.isPremium ? <Lock size={15} /> : <Send size={15} />} Use</Button></Card.Footer>
+                      <Card.Footer><Button isDisabled={template.isPremium} onClick={() => Toast.toast.success(language === "ar" ? `تم اختيار ${template.name}` : `${template.name} selected`)}>{template.isPremium ? <Lock size={15} /> : <Send size={15} />} {language === "ar" ? "استخدام" : "Use"}</Button></Card.Footer>
                     </Card>
                   ))}
                 </div>
@@ -418,20 +636,111 @@ function ConsoleShell({
             </Tabs>
           </section>
         </Surface>
+        <WaslaNavCapsule
+          mode="console"
+          placement="bottom"
+          user={user}
+          onAuthOpen={onAuthOpen}
+          onNavigate={(key) => key === "agent" ? startNewChat() : selectTab(key)}
+        />
       </main>
+      <ProductTour open={tourOpen} steps={onboardingSteps} onComplete={completeTour} />
     </>
   );
 }
 
-function HeroUIMetric({ icon: Icon, label, value }: { icon: typeof Target; label: string; value: string }) {
+function AgentMissionPage({
+  busy,
+  chatInput,
+  consoleMessages,
+  intake,
+  language,
+  leads,
+  leadRunTick,
+  onInputChange,
+  onRun,
+  onSend,
+  user,
+}: {
+  busy: boolean;
+  chatInput: string;
+  consoleMessages: Array<{ role: string; text: string }>;
+  intake: IntakeState;
+  language: "ar" | "en";
+  leads: Lead[];
+  leadRunTick: number;
+  onInputChange: (value: string) => void;
+  onRun: () => void;
+  onSend: () => void;
+  user: AuthUser | null;
+}) {
+  const ready = intake.confidence === 100;
+
   return (
-    <Card className="hconsole-card hconsole-metric">
-      <Card.Content>
-        <Icon size={18} />
-        <span>{label}</span>
-        <strong>{value}</strong>
-      </Card.Content>
-    </Card>
+    <section className="ops-agent-page" data-tour="agent">
+      <div className="ops-agent-page__top">
+        <div><span /> {busy ? (language === "ar" ? "وصلة تعمل الآن" : "Wasla is working") : (language === "ar" ? "جاهز للمحادثة" : "Ready to chat")}</div>
+        <strong>{language === "ar" ? "ابدأ محادثة جديدة" : "Start a new chat"} <WaslaBrand variant="symbol" inverse /></strong>
+      </div>
+
+      <div className="ops-chat-stage">
+        <header className="ops-chat-stage__intro">
+          <WaslaBrand variant="symbol" inverse />
+          <span>{language === "ar" ? "محادثة تحول الوصف إلى عملاء" : "A conversation that turns intent into leads"}</span>
+          <h1>{language === "ar" ? "من تريد أن تصل إليه؟" : "Who do you want to reach?"}</h1>
+          <p>{language === "ar" ? "اكتبها كما تقولها لفريقك. وصلة تسأل، تبحث، وتعرض النتائج هنا لحظة بلحظة." : "Say it the way you would to your team. Wasla asks, researches, and streams the results here in real time."}</p>
+        </header>
+
+        <div className="ops-agent-page__conversation" aria-live="polite">
+          {consoleMessages.map((message, index) => (
+            <div className={`ops-chat-message is-${message.role}`} key={`${message.role}-${index}-${message.text}`}>
+              <span className="ops-chat-message__mark">{message.role === "assistant" ? <WaslaBrand variant="symbol" inverse /> : (user?.name?.slice(0, 1) ?? "Y")}</span>
+              <p>{message.text}</p>
+            </div>
+          ))}
+          {busy ? (
+            <div className="ops-chat-message is-assistant is-thinking">
+              <span className="ops-chat-message__mark"><WaslaBrand variant="symbol" inverse /></span>
+              <p><i /><i /><i /><small>{language === "ar" ? "أفهم الطلب وأبني قائمة البحث" : "Understanding the request and building the search"}</small></p>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="ops-chat-composer">
+          <input
+            value={chatInput}
+            onChange={(event) => onInputChange(event.target.value)}
+            onKeyDown={(event) => event.key === "Enter" && onSend()}
+            placeholder={language === "ar" ? "مثال: شركات لوجستية في جدة ما زالت ترسل عروض الأسعار يدوياً" : "Example: Logistics companies in Jeddah still sending quotes manually"}
+            aria-label={language === "ar" ? "اكتب رسالة إلى وصلة" : "Message Wasla"}
+          />
+          <span className="ops-chat-composer__sparkle" aria-hidden="true"><Sparkles size={22} /></span>
+          <LiquidMetalSubmitButton onClick={onSend} disabled={busy} label={language === "ar" ? "إرسال الرسالة" : "Send message"}>
+            {language === "ar" ? <ArrowUpLeft size={34} /> : <ArrowUpRight size={34} />}
+          </LiquidMetalSubmitButton>
+        </div>
+
+        <div className="ops-chat-controls">
+          <div className="ops-agent-page__readiness">
+            <span>{language === "ar" ? "وضوح الطلب" : "Brief clarity"}</span>
+            <i><b style={{ width: `${intake.confidence}%` }} /></i>
+            <strong>{intake.confidence}%</strong>
+          </div>
+          <button className="ops-chat-run" onClick={onRun} disabled={busy || Boolean(user?.verifiedPhone && !ready)}>
+            {busy ? <RefreshCw className="is-spinning" size={17} /> : <Play size={17} />}
+            {language === "ar" ? "ابدأ جلب العملاء" : "Start finding leads"}
+          </button>
+        </div>
+      </div>
+
+      <div className="ops-chat-results">
+        <div className="ops-agent-page__status">
+          <span><i /> {busy ? (language === "ar" ? "تصل النتائج الآن" : "Results arriving now") : (language === "ar" ? "تدفق العملاء" : "Lead stream")}</span>
+          <strong>{busy ? "···" : leads.slice(0, 5).length}</strong>
+        </div>
+        <AnimatedLeadPreview leads={leads} active={busy} runKey={leadRunTick} language={language} />
+      </div>
+    </section>
   );
 }
 
@@ -453,138 +762,459 @@ function HeroUIBars({ title, items }: { title: string; items: Array<{ label: str
   );
 }
 
-function LandingChat({ onLeadAsk }: { onLeadAsk: (ask: string) => void }) {
+function AnimatedLeadPreview({ leads, active, runKey, language }: { leads: Lead[]; active: boolean; runKey: number; language: "ar" | "en" }) {
+  const previewLeads = leads.slice(0, 5);
+  return (
+    <div className={`lead-reveal${active ? " is-active" : ""}`} key={runKey} aria-live="polite">
+      <div className="lead-reveal__scan" aria-hidden="true" />
+      <header>
+        <span><i /> {active ? (language === "ar" ? "يتم توليد العملاء الآن" : "Generating leads now") : (language === "ar" ? "معاينة التدفق" : "Lead stream preview")}</span>
+        <strong>{previewLeads.length}</strong>
+      </header>
+      <div className="lead-reveal__table">
+        <div className="lead-reveal__row is-head">
+          <span>{language === "ar" ? "الشركة" : "Company"}</span>
+          <span>{language === "ar" ? "صانع القرار" : "Decision maker"}</span>
+          <span>{language === "ar" ? "الملاءمة" : "Fit"}</span>
+        </div>
+        {active ? Array.from({ length: 5 }, (_, index) => (
+          <div className="lead-reveal__row is-skeleton" style={{ animationDelay: `${index * 90}ms` }} key={`skeleton-${index}`} aria-hidden="true">
+            <span><b /><small /></span>
+            <span><b /><small /></span>
+            <span><strong /><i /></span>
+          </div>
+        )) : previewLeads.map((lead, index) => (
+          <div className="lead-reveal__row" style={{ animationDelay: `${index * 140}ms` }} key={lead.id}>
+            <span><b>{lead.company}</b><small>{lead.industry} · {lead.location.split(",")[0]}</small></span>
+            <span>{lead.name}<small>{lead.title}</small></span>
+            <span><strong>{lead.fitScore}%</strong><i style={{ width: `${lead.fitScore}%` }} /></span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function InsightDashboard({ leads, research, language }: { leads: Lead[]; research: CompanyResearch[]; language: "ar" | "en" }) {
+  const totalPipeline = leads.reduce((sum, lead) => sum + lead.revenueEstimate, 0);
+  const avgFit = leads.length ? Math.round(leads.reduce((sum, lead) => sum + lead.fitScore, 0) / leads.length) : 0;
+  const qualified = leads.filter((lead) => lead.fitScore >= 80);
+  const coverage = leads.length ? Math.round((research.length / leads.length) * 100) : 0;
+  const topSegment = topGroup(leads, (lead) => lead.industry);
+  const topCity = topGroup(leads, (lead) => lead.location.split(",")[0] || "Unknown");
+  const topLeads = [...leads].sort((a, b) => b.fitScore - a.fitScore).slice(0, 4);
+  const opportunities = research.flatMap((item) => item.opportunities).slice(0, 5);
+  const weaknesses = research.flatMap((item) => item.weaknesses).slice(0, 4);
+  const segmentItems = groupItems(leads, (lead) => lead.industry).slice(0, 5).map((item) => ({ label: item.label, value: Math.round((item.count / Math.max(leads.length, 1)) * 100) }));
+  const cityItems = groupItems(leads, (lead) => lead.location.split(",")[0] || "Unknown").slice(0, 5).map((item) => ({ label: item.label, value: Math.round((item.count / Math.max(leads.length, 1)) * 100) }));
+  const recommendations = language === "ar" ? [
+    `ابدأ بـ ${topSegment.label}: يمثل ${topSegment.count} من السجلات ومتوسط الملاءمة أعلى من خط التشغيل.`,
+    `ركّز أول 48 ساعة على ${topCity.label}: أعلى كثافة جغرافية وأسهل لتجربة الاتصال.`,
+    `${qualified.length} عميل فوق 80% يستحق بحثاً عميقاً قبل أي حملة واسعة.`,
+  ] : [
+    `Start with ${topSegment.label}: it owns ${topSegment.count} records and sits above the operating fit line.`,
+    `Focus the first 48 hours on ${topCity.label}: highest geographic density and easiest calling batch.`,
+    `${qualified.length} leads above 80% deserve deep research before any broad campaign.`,
+  ];
+
+  return (
+    <div className="insights-command">
+      <header className="insights-command__hero">
+        <span><BarChart3 size={15} /> {language === "ar" ? "تحليل مبني على بيانات العملاء" : "Analysis from your lead data"}</span>
+        <h1>{language === "ar" ? "أين نربح؟ ومن نتصل به أولاً؟" : "Where do we win, and who gets called first?"}</h1>
+        <p>{language === "ar" ? "القراءة هنا مبنية على القطاع، المدينة، الملاءمة، القيمة المتوقعة، وتغطية البحث العميق." : "This read combines segment, city, fit, expected value, and deep-research coverage."}</p>
+      </header>
+
+      <section className="insights-command__metrics">
+        <div><span>{language === "ar" ? "قيمة الفرص" : "Pipeline value"}</span><strong>{money(totalPipeline)}</strong><small>{leads.length} {language === "ar" ? "عميل" : "leads"}</small></div>
+        <div><span>{language === "ar" ? "متوسط الملاءمة" : "Average fit"}</span><strong>{avgFit}%</strong><small>{qualified.length} {language === "ar" ? "جاهزون" : "ready"}</small></div>
+        <div><span>{language === "ar" ? "أقوى قطاع" : "Strongest segment"}</span><strong>{topSegment.label}</strong><small>{topSegment.count} {language === "ar" ? "سجلات" : "records"}</small></div>
+        <div><span>{language === "ar" ? "تغطية البحث العميق" : "Deep research coverage"}</span><strong>{coverage}%</strong><small>{research.length}/{leads.length}</small></div>
+      </section>
+
+      <section className="insights-command__grid">
+        <HeroUIBars title={language === "ar" ? "توزيع القطاعات" : "Segment concentration"} items={segmentItems} />
+        <HeroUIBars title={language === "ar" ? "زخم المدن" : "City momentum"} items={cityItems} />
+        <Card className="hconsole-card insights-command__moves">
+          <Card.Header><Card.Title>{language === "ar" ? "قرارات التشغيل التالية" : "Next operating moves"}</Card.Title><Card.Description>{language === "ar" ? "ما يجب فعله الآن" : "What to do now"}</Card.Description></Card.Header>
+          <Card.Content>
+            {recommendations.map((item, index) => <p key={item}><strong>{String(index + 1).padStart(2, "0")}</strong>{item}</p>)}
+          </Card.Content>
+        </Card>
+      </section>
+
+      <section className="insights-command__grid is-wide">
+        <Card className="hconsole-card insights-command__accounts">
+          <Card.Header><Card.Title>{language === "ar" ? "أفضل الحسابات للبدء" : "Best accounts to start"}</Card.Title><Card.Description>{language === "ar" ? "مرتب حسب الملاءمة" : "Sorted by fit"}</Card.Description></Card.Header>
+          <Card.Content>
+            {topLeads.map((lead) => (
+              <div key={lead.id}>
+                <span><b>{lead.company}</b><small>{lead.name} · {lead.title}</small></span>
+                <strong>{lead.fitScore}%</strong>
+                <i style={{ width: `${lead.fitScore}%` }} />
+              </div>
+            ))}
+          </Card.Content>
+        </Card>
+        <Card className="hconsole-card insights-command__signals">
+          <Card.Header><Card.Title>{language === "ar" ? "إشارات البحث العميق" : "Deep research signals"}</Card.Title><Card.Description>{language === "ar" ? "فرص ومخاطر من البيانات المرسلة" : "Opportunities and risks from submitted data"}</Card.Description></Card.Header>
+          <Card.Content className="hconsole-chip-list">
+            {[...opportunities, ...weaknesses].map((item) => <Chip key={item}><Chip.Label>{item}</Chip.Label></Chip>)}
+          </Card.Content>
+        </Card>
+      </section>
+    </div>
+  );
+}
+
+function useLiquidMetalShader() {
+  const shaderRef = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (!shaderRef.current) return;
+
+    const shader = new ShaderMount(
+      shaderRef.current,
+      liquidMetalFragmentShader,
+      {
+        u_repetition: 1.5,
+        u_softness: 0.5,
+        u_shiftRed: 0.3,
+        u_shiftBlue: 0.3,
+        u_distortion: 0,
+        u_contour: 0,
+        u_angle: 100,
+        u_scale: 1.5,
+        u_shape: 1,
+        u_offsetX: 0.1,
+        u_offsetY: -0.1,
+      },
+      undefined,
+      0.6,
+    );
+
+    return () => shader.dispose();
+  }, []);
+
+  return shaderRef;
+}
+
+function LiquidMetalSubmitButton({ label, onClick, children, disabled = false }: { label: string; onClick: () => void; children: React.ReactNode; disabled?: boolean }) {
+  const shaderRef = useLiquidMetalShader();
+
+  return (
+    <button className="liquid-metal-submit" type="button" onClick={onClick} disabled={disabled} aria-label={label}>
+      <span className="liquid-metal-submit__shader" ref={shaderRef} aria-hidden="true" />
+      <span className="liquid-metal-submit__outline" aria-hidden="true" />
+      <span className="liquid-metal-submit__icon" aria-hidden="true">{children}</span>
+    </button>
+  );
+}
+
+function LiquidMetalNavTrigger({ open, onClick, label, controls }: { open: boolean; onClick: () => void; label: string; controls: string }) {
+  const shaderRef = useLiquidMetalShader();
+
+  return (
+    <button className="wasla-nav-capsule__trigger" type="button" onClick={onClick} aria-expanded={open} aria-controls={controls} aria-label={label}>
+      <span className="wasla-nav-capsule__metal" ref={shaderRef} aria-hidden="true" />
+      <span className="wasla-nav-capsule__trigger-core" aria-hidden="true" />
+      <WaslaBrand variant="symbol" inverse />
+    </button>
+  );
+}
+
+function WaslaNavCapsule({
+  mode,
+  placement,
+  user,
+  onAuthOpen,
+  onNavigate,
+}: {
+  mode: "landing" | "console";
+  placement: "top" | "bottom";
+  user: AuthUser | null;
+  onAuthOpen: (mode?: "signup" | "login") => void;
+  onNavigate?: (key: string) => void;
+}) {
+  const { direction, language, t } = useLanguage();
+  const [open, setOpen] = useState(false);
+  const capsuleRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    function closeOnOutsideClick(event: MouseEvent) {
+      if (capsuleRef.current && !capsuleRef.current.contains(event.target as Node)) setOpen(false);
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, []);
+
+  const consoleLinks = [
+    ["agent", language === "ar" ? "ابدأ محادثة جديدة" : "Start a new chat", Sparkles],
+    ["overview", t("console.overview"), LayoutDashboard],
+    ["leads", t("console.leads"), Building2],
+    ["insights", t("console.insights"), BarChart3],
+    ["proposals", t("console.proposals"), FileText],
+    ["emails", t("console.emails"), Mail],
+  ] as const;
+  const sheetId = `wasla-nav-sheet-${mode}`;
+
+  return (
+    <nav ref={capsuleRef} className={`wasla-nav-capsule is-${placement} is-${mode}${open ? " is-open" : ""}`} dir={direction} aria-label={language === "ar" ? "قائمة وصلة" : "Wasla navigation"}>
+      <div className="wasla-nav-capsule__bar">
+        <LiquidMetalNavTrigger open={open} onClick={() => setOpen((current) => !current)} controls={sheetId} label={language === "ar" ? "فتح قائمة وصلة" : "Open Wasla menu"} />
+        <div className="wasla-nav-capsule__essentials">
+          {mode === "console" ? (
+            <>
+              <button type="button" onClick={() => onNavigate?.("agent")}><Sparkles size={14} /><span>{language === "ar" ? "محادثة جديدة" : "New chat"}</span></button>
+              <button type="button" onClick={() => onNavigate?.("leads")}><Building2 size={14} /><span>{t("console.leads")}</span></button>
+            </>
+          ) : user ? (
+            <>
+              <a href="#pricing"><WalletCards size={14} /><span>{language === "ar" ? "الباقات" : "Pricing"}</span></a>
+              <Link to="/console"><LayoutDashboard size={14} /><span>{language === "ar" ? "فتح المساحة" : "Open console"}</span></Link>
+            </>
+          ) : (
+            <>
+              <a href="#pricing"><WalletCards size={14} /><span>{language === "ar" ? "الباقات" : "Pricing"}</span></a>
+              <button type="button" onClick={() => onAuthOpen("login")}><LogIn size={14} /><span>{language === "ar" ? "تسجيل الدخول" : "Log in"}</span></button>
+              <button className="is-primary" type="button" onClick={() => onAuthOpen("signup")}><UserPlus size={14} /><span>{language === "ar" ? "إنشاء حساب" : "Create account"}</span></button>
+              <Link to="/console"><LayoutDashboard size={14} /><span>{language === "ar" ? "فتح المساحة" : "Open console"}</span></Link>
+            </>
+          )}
+        </div>
+        <LanguageToggle inverse />
+        <Link className="wasla-nav-capsule__brand" to="/" aria-label={language === "ar" ? "العودة إلى وصلة" : "Back to Wasla"}><WaslaBrand variant="horizontal" inverse /></Link>
+      </div>
+
+      <div id={sheetId} className="wasla-nav-capsule__sheet" aria-hidden={!open}>
+        <header>
+          <span>{language === "ar" ? "تنقل في وصلة" : "Explore Wasla"}</span>
+          <strong>{user?.business ?? (language === "ar" ? "كل شيء من مكان واحد" : "Everything in one place")}</strong>
+        </header>
+        <div className="wasla-nav-capsule__links">
+          {mode === "console" ? consoleLinks.map(([key, label, Icon]) => (
+            <button key={key} type="button" onClick={() => { onNavigate?.(key); setOpen(false); }}>
+              <Icon size={17} /><span>{label}</span>{language === "ar" ? <ArrowLeft size={15} /> : <ArrowRight size={15} />}
+            </button>
+          )) : (
+            <>
+              <a href="#agent" onClick={() => setOpen(false)}><Sparkles size={17} /><span>{t("nav.agent")}</span>{language === "ar" ? <ArrowLeft size={15} /> : <ArrowRight size={15} />}</a>
+              <a href="#workflow" onClick={() => setOpen(false)}><Activity size={17} /><span>{t("nav.workflow")}</span>{language === "ar" ? <ArrowLeft size={15} /> : <ArrowRight size={15} />}</a>
+              <a href="#pricing" onClick={() => setOpen(false)}><WalletCards size={17} /><span>{language === "ar" ? "الباقات" : "Pricing"}</span>{language === "ar" ? <ArrowLeft size={15} /> : <ArrowRight size={15} />}</a>
+              <Link to="/console" onClick={() => setOpen(false)}><LayoutDashboard size={17} /><span>{t("nav.workspace")}</span>{language === "ar" ? <ArrowLeft size={15} /> : <ArrowRight size={15} />}</Link>
+            </>
+          )}
+        </div>
+        <footer>
+          {user ? <Link to="/console" onClick={() => setOpen(false)}>{language === "ar" ? "فتح مساحتي" : "Open my workspace"}</Link> : <button type="button" onClick={() => { setOpen(false); onAuthOpen(); }}>{t("nav.start")}</button>}
+          <span>{language === "ar" ? "وصلة تعمل الآن" : "Wasla is online"}<i /></span>
+        </footer>
+      </div>
+    </nav>
+  );
+}
+
+function LandingChat({ user, onLeadAsk, onAuthOpen }: { user: AuthUser | null; onLeadAsk: (ask: string) => void; onAuthOpen: (mode?: "signup" | "login") => void }) {
+  const { direction, language, t } = useLanguage();
   const [input, setInput] = useState("");
+  const [exampleIndex, setExampleIndex] = useState(0);
   const navigate = useNavigate();
+
+  const examples = language === "ar" ? [
+    { request: "أبغى ملاك عيادات أسنان في الرياض عندهم أكثر من فرعين", response: "سأبحث عن المالك أو مدير التشغيل، وأتحقق من عدد الفروع قبل الاتصال." },
+    { request: "شركات لوجستية في جدة ما زالت ترسل عروض الأسعار يدوياً", response: "سأعطي الأولوية لمديري المبيعات والعمليات مع إشارة واضحة للعمل اليدوي." },
+    { request: "مطاعم راقية في الخبر تحتاج شراكات وحجوزات شركات", response: "سأستهدف المدير العام أو مسؤول الشراكات، ثم أؤهل الاحتياج والموسمية هاتفياً." },
+  ] : [
+    { request: "Dental clinic owners in Riyadh with more than two branches", response: "I will find the owner or operations director and verify branch count before calling." },
+    { request: "Logistics companies in Jeddah still sending quotes manually", response: "I will prioritize sales and operations leaders with evidence of a manual quoting process." },
+    { request: "Premium restaurants in Khobar seeking corporate bookings", response: "I will target general managers or partnerships leads, then qualify demand and seasonality by phone." },
+  ];
+
+  useEffect(() => {
+    if (input) return;
+    const timer = window.setInterval(() => setExampleIndex((current) => (current + 1) % examples.length), 4200);
+    return () => window.clearInterval(timer);
+  }, [examples.length, input]);
 
   function submitAsk(text = input) {
     const ask = text.trim();
     if (!ask) return;
     onLeadAsk(ask);
-    navigate("/secure");
+    if (user?.verifiedPhone) navigate("/console/agent");
+    else onAuthOpen();
   }
 
-  const promptChips = [
+  const promptChips = language === "ar" ? [
     "أصحاب عيادات في الرياض يحتاجون متابعة أسرع",
     "مطاعم في جدة تحتاج حجوزات وشراكات",
     "شركات لوجستية في السعودية عندها عروض أسعار يدوية",
-    "وكالات عقار في دبي تبحث عن مشترين جادين",
+  ] : [
+    "Clinic owners in Riyadh who need faster follow-up",
+    "Restaurants in Jeddah seeking corporate partnerships",
+    "Saudi logistics companies with manual quoting",
+  ];
+  const bundles = language === "ar" ? [
+    { name: "Launch", price: "2,999", leads: "3K", research: "1.5K", note: "للفرق التي تريد قوائم غنية وبحثاً عميقاً منتظماً.", features: ["3,000 عميل مثرى", "1,500 بحث عميق", "تصدير وتنقية داخل مساحة وصلة"] },
+    { name: "Scale", price: "3,999", leads: "6K", research: "3K", note: "دفعة أكبر للفرق التي تختبر أكثر من قطاع.", features: ["6,000 عميل مثرى", "3,000 بحث عميق", "أولوية في تشغيل Apify وOpenRouter"] },
+    { name: "Autopilot", price: "حسب الطلب", leads: "10K", research: "6K", note: "وكيل يثري أكثر، يتصل، ويحوّل الاهتمام إلى اجتماع Zoom.", features: ["10,000 عميل مثرى", "6,000 بحث عميق", "بوت اتصال وتأهيل وحجز اجتماعات"] },
+  ] : [
+    { name: "Launch", price: "2,999", leads: "3K", research: "1.5K", note: "For teams that need enriched lists plus steady deep research.", features: ["3,000 enriched leads", "1,500 deep researches", "Export and refinement inside Wasla"] },
+    { name: "Scale", price: "3,999", leads: "6K", research: "3K", note: "A bigger batch for teams testing more than one segment.", features: ["6,000 enriched leads", "3,000 deep researches", "Priority Apify and OpenRouter runs"] },
+    { name: "Autopilot", price: "Custom", leads: "10K", research: "6K", note: "An agent that enriches, calls, qualifies, and books Zoom meetings.", features: ["10,000 enriched leads", "6,000 deep researches", "Calling bot with meeting handoff"] },
+  ];
+  const testimonials = language === "ar" ? [
+    ["نورة السبيعي", "مؤسسة وكالة نمو", "حولنا طلباً واحداً إلى قائمة حسابات واضحة. أكثر شيء فرق معنا أن كل عميل جاء بسبب مقنع للتواصل."],
+    ["عبدالله الحربي", "مدير مبيعات B2B", "البحث العميق اختصر ساعات من التجهيز قبل المكالمات، والفريق صار يعرف من يتصل ولماذا."],
+    ["ريم العيسى", "شريكة في عيادات", "بدل ملفات مبعثرة، صارت الفرص مرتبة حسب الملاءمة والخطوة التالية."],
+    ["فهد الدوسري", "مؤسس SaaS", "أفضل جزء أن الوكيل يسأل قبل ما يصرف الرصيد. حسّيت أنه يفهم السوق مو بس يسحب بيانات."],
+    ["Maha Kareem", "Growth Lead", "The table animation is not just pretty. It makes the lead run feel alive and auditable."],
+    ["Omar Haddad", "Founder", "Deep research gave our outreach a reason to exist. Replies improved because the message had context."],
+    ["سارة القحطاني", "تطوير أعمال", "أخيراً لوحة تقول لي وين أبدأ، مو بس عدد عملاء كبير بلا معنى."],
+    ["Khalid Mansour", "Agency Owner", "Wasla made our ICP tests faster. We could compare sectors in one afternoon."],
+    ["ليان باوزير", "مديرة تسويق", "المكالمات المؤهلة وفرت علينا وقت الفريق، والاجتماعات وصلت أنظف بكثير."],
+  ] : [
+    ["Noura Alsubaie", "Agency Founder", "One request turned into a clear account list. Every lead came with a reason to reach out."],
+    ["Abdullah Alharbi", "B2B Sales Manager", "Deep research cut hours of call prep, and the team finally knew who to call and why."],
+    ["Reem Alessa", "Clinic Partner", "Instead of scattered files, opportunities were ranked by fit and next step."],
+    ["Fahad Aldossari", "SaaS Founder", "The agent asks before spending credit. It feels like it understands the market, not just data scraping."],
+    ["Maha Kareem", "Growth Lead", "The table animation is not just pretty. It makes the lead run feel alive and auditable."],
+    ["Omar Haddad", "Founder", "Deep research gave our outreach a reason to exist. Replies improved because the message had context."],
+    ["Sara Alqahtani", "Business Development", "Finally, an insights page that tells me where to start, not just how many rows I have."],
+    ["Khalid Mansour", "Agency Owner", "Wasla made our ICP tests faster. We could compare sectors in one afternoon."],
+    ["Layan Bawazir", "Marketing Director", "Qualified calls saved the team time, and the meetings came in much cleaner."],
+  ];
+  const pricingGroups = language === "ar" ? [
+    { title: "توليد العملاء", rows: [["عملاء مثرون", "3,000", "6,000", "10,000"], ["مصادر Apify", true, true, true], ["تنقية وتصدير", true, true, true], ["أولوية تشغيل", false, true, true]] },
+    { title: "البحث العميق", rows: [["أبحاث عميقة", "1,500", "3,000", "6,000"], ["OpenRouter + Perplexity", true, true, true], ["ملخص فرص ومخاطر", true, true, true], ["تحديث بحث حسب الحساب", false, true, true]] },
+    { title: "التأهيل والاتصال", rows: [["بوت إثراء إضافي", false, false, true], ["مكالمات تأهيل", false, false, true], ["حجز Zoom معك", false, false, true], ["مساحة Directus", true, true, true]] },
+  ] : [
+    { title: "Lead generation", rows: [["Enriched leads", "3,000", "6,000", "10,000"], ["Apify sourcing", true, true, true], ["Refinement and export", true, true, true], ["Priority runs", false, true, true]] },
+    { title: "Deep research", rows: [["Deep researches", "1,500", "3,000", "6,000"], ["OpenRouter + Perplexity", true, true, true], ["Opportunity and risk briefs", true, true, true], ["Account research refresh", false, true, true]] },
+    { title: "Qualification", rows: [["Extra enrichment bot", false, false, true], ["Qualification calls", false, false, true], ["Zoom meeting booking", false, false, true], ["Directus workspace", true, true, true]] },
   ];
 
   return (
-    <main className="openai-landing arabic-ui" dir="rtl">
-      <header className="openai-nav">
-        <div className="openai-nav-inner">
-          <Link to="/" className="landing-brand">
-            <span>و</span>
-            <strong>وصلة</strong>
-          </Link>
-          <nav className="site-nav">
-            <a href="#products">المنتج</a>
-            <a href="#research">الذكاء</a>
-            <a href="#business">للشركات</a>
-            <a href="#pricing">الأسعار</a>
-            <Link to="/console">الكونسول</Link>
-          </nav>
-          <div className="nav-actions">
-            <Link to="/secure" className="login-pill">تسجيل الدخول</Link>
-            <Link to="/secure" className="try-pill">جرّب وصلة</Link>
+    <main className={`wasla-home ${language === "ar" ? "arabic-ui" : "is-english"}`} dir={direction}>
+      <WaslaNavCapsule mode="landing" placement="top" user={user} onAuthOpen={onAuthOpen} />
+
+      <section className="wasla-command" id="agent">
+        <div className="wasla-command__status"><span /> {t("landing.live")}</div>
+        <WaslaBrand variant="symbol" className="wasla-command__symbol" />
+        <h1>{t("landing.title")}</h1>
+        <p>{t("landing.description")}</p>
+        <div className="wasla-command__experience">
+          <div className="wasla-command__experience-top">
+            <span><i /> {t("landing.listening")}</span>
+            <small>{t("landing.noForm")}</small>
+          </div>
+          {!input && (
+            <div className="wasla-command__example" key={`${language}-${exampleIndex}`}>
+              <span>{t("landing.example")}</span>
+              <strong>{examples[exampleIndex].request}</strong>
+              <div><WaslaBrand variant="symbol" /><p>{examples[exampleIndex].response}</p></div>
+            </div>
+          )}
+          <div className="wasla-command__input">
+            <input
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => event.key === "Enter" && submitAsk()}
+              placeholder={t("landing.placeholder")}
+              aria-label={language === "ar" ? "اكتب نوع العملاء المطلوب" : "Describe the leads you need"}
+            />
+            <span className="wasla-command__sparkles" aria-hidden="true"><Sparkles size={24} /></span>
+            <LiquidMetalSubmitButton onClick={() => submitAsk(input || examples[exampleIndex].request)} label={language === "ar" ? "ابدأ البحث" : "Start search"}>
+              {language === "ar" ? <ArrowUpLeft size={39} /> : <ArrowUpRight size={39} />}
+            </LiquidMetalSubmitButton>
           </div>
         </div>
-      </header>
-
-      <section className="ask-hero">
-        <h1>كيف نقدر نساعدك اليوم؟</h1>
-        <div className="hero-search">
-          <input
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={(event) => event.key === "Enter" && submitAsk()}
-            placeholder="مثال: ابحث لي عن ملاك عيادات في الرياض يحتاجون نظام متابعة عملاء"
-            aria-label="اكتب نوع العملاء المطلوب"
-          />
-          <button onClick={() => submitAsk()} aria-label="إرسال طلب العملاء">
-            <ArrowRight size={18} />
-          </button>
+        <div className="wasla-command__prompts" aria-label={language === "ar" ? "طلبات مقترحة" : "Suggested requests"}>
+          {promptChips.map((prompt) => <button key={prompt} onClick={() => submitAsk(prompt)}>{prompt}</button>)}
         </div>
-        <div className="landing-chip-row">
-          {promptChips.map((prompt) => (
-            <button key={prompt} onClick={() => submitAsk(prompt)}>{prompt}</button>
+        <div className="wasla-command__trust">
+          <span><ShieldCheck size={15} /> {t("landing.protected")}</span>
+          <span><Gift size={15} /> {t("landing.credit")}</span>
+          <span><BadgeCheck size={15} /> {t("landing.qualified")}</span>
+        </div>
+      </section>
+
+      <section className="wasla-workflow" id="workflow">
+        <div className="wasla-workflow__heading">
+          <span>{t("workflow.eyebrow")}</span>
+          <h2>{t("workflow.title")}</h2>
+          <p>{t("workflow.body")}</p>
+        </div>
+        <LeadFlowVisual />
+      </section>
+
+      <section className="wasla-pricing" id="pricing">
+        <div className="wasla-pricing__heading">
+          <span>{language === "ar" ? "الباقات" : "Pricing"}</span>
+          <h2>{language === "ar" ? "باقات وصلة" : "Pricing plans"}</h2>
+          <p>{language === "ar" ? "ابدأ بعملاء مثرين وبحث عميق، ثم ارتقِ إلى وكيل يتصل ويحجز الاجتماعات." : "Start with enriched leads and deep research, then scale into an agent that calls and books meetings."}</p>
+        </div>
+        <div className="wasla-pricing__shelf">
+          {bundles.map((bundle, index) => (
+            <article className={index === 1 ? "is-featured" : ""} key={bundle.name}>
+              <span className={`wasla-pricing__icon is-${index + 1}`} aria-hidden="true"><i /></span>
+              <header>
+                <span>{bundle.name}</span>
+                <strong>{bundle.price === "Custom" || bundle.price === "حسب الطلب" ? bundle.price : `${bundle.price} SAR`}</strong>
+                <p>{bundle.note}</p>
+              </header>
+              <button onClick={user ? () => navigate("/console") : () => onAuthOpen("signup")}>{language === "ar" ? "ابدأ الآن" : "Get started"} {language === "ar" ? <ArrowLeft size={16} /> : <ArrowRight size={16} />}</button>
+            </article>
           ))}
         </div>
-      </section>
-
-      <section className="blog-section" id="products">
-        <article className="main-blog">
-          <div className="blog-meta">
-            <span>15 أغسطس 2026</span>
-            <span>منتج</span>
-            <span>إطلاق</span>
-          </div>
-          <h2>وصلة تطلق تجربة البحث الذكي عن العملاء باللغة العربية</h2>
-          <p>اسأل عن نوع العميل الذي تريده، ودع وصلة تحول الطلب إلى شريحة واضحة قبل جلب البيانات، حتى لا ينصرف الرصيد على أسماء غير مناسبة.</p>
-          <div className="blog-actions">
-            <button><MessageSquareText size={15} /> استمع للمقال</button>
-            <span>04:30</span>
-            <Link to="/secure"><ArrowRight size={15} /> ابدأ التجربة</Link>
-          </div>
-          <figure className="main-blog-media">
-            <img src="/waslah-main-blog.avif" alt="شبكة ضوئية تمثل ذكاء وصلة في البحث عن العملاء" />
-            <figcaption>واجهة بحث عربية تقرأ السوق قبل أن تبدأ عملية جلب العملاء.</figcaption>
-          </figure>
-          <div className="blog-copy">
-            <p><strong>تحديث:</strong> النسخة المجانية تتيح جلب 20 عميل في كل عملية، مع رصيد ترحيبي بقيمة 30 ريال عند إنشاء الحساب.</p>
-            <p>الفكرة بسيطة: لا تبدأ من قائمة خام. ابدأ من سؤال واضح، ثم اجعل النظام يثبت المجال، المدينة، صانع القرار، وإشارة الاهتمام قبل تشغيل الجلب.</p>
-          </div>
-        </article>
-        <aside className="blog-sidebar">
-          <article className="blog-card">
-            <div className="story-art night" />
-            <div>
-              <span>تشغيل · 3 دقائق</span>
-              <h3>كيف تحافظ وصلة على جودة نتائج الجلب المجاني؟</h3>
-              <p>حد 20 عميل لكل عملية يجعل التجربة أسرع وأسهل للمراجعة.</p>
-            </div>
-          </article>
-          <article className="blog-card">
-            <div className="story-art phone" />
-            <div>
-              <span>حسابات · دقيقتان</span>
-              <h3>رصيد 30 ريال: بداية عملية لاختبار قناة مبيعات جديدة</h3>
-              <p>رصيد الترحيب يكفي لجلب 30 عميل مناسب كبداية.</p>
-            </div>
-          </article>
-          <article className="blog-card">
-            <div className="story-art health" />
-            <div>
-              <span>السوق · 5 دقائق</span>
-              <h3>لماذا تحتاج فرق المبيعات العربية إلى بحث محلي؟</h3>
-              <p>اللغة، المدينة، ونوع صانع القرار تغيّر جودة التواصل بالكامل.</p>
-            </div>
-          </article>
-        </aside>
-      </section>
-
-      <section className="news-row" id="business">
-        <div className="section-title">
-          <h2>آخر ما يحدث في وصلة</h2>
-          <Link to="/console">عرض الكونسول</Link>
+        <div className="wasla-pricing__matrix">
+          {pricingGroups.map((group) => (
+            <section key={group.title}>
+              <h3>{group.title}</h3>
+              {group.rows.map(([label, launch, scale, autopilot]) => (
+                <div className="wasla-pricing__row" key={String(label)}>
+                  <span>{label}</span>
+                  {[launch, scale, autopilot].map((value, index) => (
+                    <strong className={value === true ? "is-check" : value === false ? "is-empty" : ""} key={`${label}-${index}`}>
+                      {value === true ? <BadgeCheck size={18} /> : value === false ? "—" : value}
+                    </strong>
+                  ))}
+                </div>
+              ))}
+            </section>
+          ))}
+          <footer>
+            {bundles.map((bundle) => <button key={bundle.name} onClick={user ? () => navigate("/console") : () => onAuthOpen("signup")}>{language === "ar" ? "ابدأ" : "Get started"}</button>)}
+          </footer>
         </div>
-        <div className="news-grid">
-          {[
-            ["إطلاق صفحة البحث الآمن للنسخة المجانية", "منتج"],
-            ["تحديد سقف 20 عميل لكل عملية للحفاظ على الجودة", "تشغيل"],
-            ["رصيد ترحيبي 30 ريال عند إنشاء الحساب", "حسابات"],
-            ["تجهيز قوالب تواصل عربية بعد جلب العملاء", "مبيعات"],
-          ].map(([title, category]) => (
-            <article key={title} className="news-item">
-              <div />
-              <h3>{title}</h3>
-              <p>{category} · قراءة دقيقة</p>
+      </section>
+
+      <section className="wasla-testimonials">
+        <div className="wasla-testimonials__heading">
+          <span>{language === "ar" ? "أصوات العملاء" : "Customer proof"}</span>
+          <h2>{language === "ar" ? "شهادات كثيرة، لأن الثقة لا تأتي من بطاقة واحدة." : "Lots of testimonials, because trust should not hang on one card."}</h2>
+        </div>
+        <div className="wasla-testimonials__grid">
+          {testimonials.map(([name, role, quote]) => (
+            <article key={`${name}-${role}`}>
+              <p>{quote}</p>
+              <footer><strong>{name}</strong><span>{role}</span></footer>
             </article>
           ))}
         </div>
       </section>
+
+      <footer className="wasla-home__footer">
+        <WaslaBrand variant="english" inverse />
+        <span>{language === "ar" ? "بسيط · متصل · ذكي" : "Simple · Connected · Smart"}</span>
+        <strong>{language === "ar" ? "منتج سعودي يبني اتصالاً ذا قيمة" : "A Saudi product creating valuable connections"}</strong>
+      </footer>
     </main>
   );
 }
@@ -605,254 +1235,65 @@ function AvatarMark({ user, size = "md" }: { user: AuthUser | null; size?: "md" 
   );
 }
 
-function SecureLeadPage({
-  initialAsk,
-  user,
-  onAuthChange,
-  onLeadsFetched,
-}: {
-  initialAsk: string;
-  user: AuthUser | null;
-  onAuthChange: (user: AuthUser) => void;
-  onLeadsFetched: (leads: Lead[]) => void;
-}) {
-  const [input, setInput] = useState(initialAsk);
-  const [messages, setMessages] = useState([
-    { role: "assistant", text: "أهلاً بك في الصفحة الآمنة. قبل الجلب، سأثبت نوع العميل وأوضح حدود النسخة المجانية." },
-    { role: "user", text: initialAsk },
-  ]);
-  const [authStep, setAuthStep] = useState<"signup" | "verify" | "complete">(user?.verifiedPhone ? "complete" : user ? "verify" : "signup");
-  const [authForm, setAuthForm] = useState({
-    name: user?.name ?? "",
-    business: user?.business ?? "",
-    phone: user?.phone ?? "",
-  });
-  const [otp, setOtp] = useState("");
-  const [otpHint, setOtpHint] = useState("2468");
-  const [intake, setIntake] = useState<IntakeState>({
-    confidence: 68,
-    summary: initialAsk,
-    missing: ["تأكيد المدينة", "دور صانع القرار"],
-    apifyActor: "apify/google-maps-scraper",
-    apifyInput: { maxCrawledPlacesPerSearch: 20 },
-  });
-  const [busy, setBusy] = useState(false);
-
-  const previewUser: AuthUser = user ?? {
-    id: "preview",
-    name: authForm.name || "ضيف وصلة",
-    business: authForm.business || "فريق المبيعات",
-    phone: authForm.phone || "+966 5X XXX XXXX",
-    avatarTone: createAvatarTone(authForm.name),
-    verifiedPhone: false,
-    freeCreditSar: 0,
-    createdAt: new Date().toISOString(),
+function leadStatusLabel(status: Lead["status"], language: "ar" | "en") {
+  const labels: Record<Lead["status"], { ar: string; en: string }> = {
+    new: { ar: "جديد", en: "New" },
+    qualified: { ar: "مؤهل", en: "Qualified" },
+    researching: { ar: "قيد البحث", en: "Researching" },
+    proposal: { ar: "عرض", en: "Proposal" },
+    contacted: { ar: "تم التواصل", en: "Contacted" },
+    won: { ar: "مكتسب", en: "Won" },
+    lost: { ar: "مغلق", en: "Closed" },
   };
-
-  function startAccount() {
-    if (!authForm.name.trim() || !authForm.phone.trim()) {
-      setMessages((current) => [...current, { role: "assistant", text: "اكتب الاسم ورقم الجوال أولاً، وبعدها نرسل رمز التحقق ونجهز الرصيد." }]);
-      return;
-    }
-
-    const code = "2468";
-    const nextUser: AuthUser = {
-      id: `user-${Date.now()}`,
-      name: authForm.name.trim(),
-      business: authForm.business.trim() || "فريق جديد",
-      phone: authForm.phone.trim(),
-      avatarTone: createAvatarTone(authForm.name),
-      verifiedPhone: false,
-      freeCreditSar: 0,
-      createdAt: new Date().toISOString(),
-    };
-    setOtpHint(code);
-    onAuthChange(nextUser);
-    setAuthStep("verify");
-    setMessages((current) => [...current, { role: "assistant", text: `تم إنشاء الحساب. أدخل رمز التحقق ${code} لتفعيل رصيد 30 ريال.` }]);
-  }
-
-  function verifyPhone() {
-    if (!user) return;
-    if (otp.trim() !== otpHint) {
-      setMessages((current) => [...current, { role: "assistant", text: "رمز التحقق غير صحيح. جرّب الرمز الظاهر في البطاقة التجريبية." }]);
-      return;
-    }
-
-    const verifiedUser = {
-      ...user,
-      verifiedPhone: true,
-      freeCreditSar: 30,
-    };
-    onAuthChange(verifiedUser);
-    setAuthStep("complete");
-    setMessages((current) => [
-      ...current,
-      { role: "assistant", text: "تم توثيق رقم الجوال. رصيد 30 ريال صار جاهز داخل محفظتك." },
-    ]);
-  }
-
-  async function sendSecureMessage(text = input) {
-    if (!text.trim() || busy) return;
-    const nextMessages = [...messages, { role: "user", text }];
-    setMessages(nextMessages);
-    setInput("");
-    setBusy(true);
-    const result = await understandLeadAsk(text, nextMessages.map((message) => `${message.role}: ${message.text}`));
-    const cappedResult = {
-      ...result,
-      apifyInput: {
-        ...result.apifyInput,
-        maxCrawledPlacesPerSearch: 20,
-      },
-    };
-    setIntake(cappedResult);
-    setMessages([
-      ...nextMessages,
-      {
-        role: "assistant",
-        text: result.confidence === 100
-          ? "ممتاز. الشريحة واضحة الآن، وبإمكانك جلب 20 عميل كحد أقصى في هذه العملية."
-          : `نحتاج نضبط التالي قبل الجلب: ${result.missing.join("، ")}.`,
-      },
-    ]);
-    setBusy(false);
-  }
-
-  async function fetchFreeLeads() {
-    if (!user?.verifiedPhone) {
-      setMessages((current) => [...current, { role: "assistant", text: "فعّل رقم الجوال أولاً حتى نضيف رصيد 30 ريال ونفتح الجلب المجاني." }]);
-      return;
-    }
-    setBusy(true);
-    const fetched = await fetchApifyLeads(intake);
-    onLeadsFetched(fetched);
-    setMessages((current) => [
-      ...current,
-      { role: "assistant", text: fetched.length ? `تمت إضافة ${fetched.length} عميل إلى الكونسول.` : "الطلب جاهز. اربط Directus و Apify لتفعيل الجلب الحقيقي." },
-    ]);
-    setBusy(false);
-  }
-
-  return (
-    <main className="secure-page arabic-ui" dir="rtl">
-      <aside className="secure-rail">
-        <Link to="/" className="rail-logo">و</Link>
-        <button aria-label="بحث"><Search size={22} /></button>
-        <button aria-label="محادثة"><MessageSquareText size={22} /></button>
-        <button aria-label="الكونسول"><Command size={22} /></button>
-        <Link to="/console" className="rail-dot" aria-label="فتح الكونسول" />
-      </aside>
-
-      <section className="secure-workspace">
-        <header className="secure-top">
-          <div className="mode-toggle">
-            <button className="active">بحث العملاء</button>
-            <button>العمل</button>
-          </div>
-          <Link to="/" className="secure-help"><RefreshCw size={20} /></Link>
-        </header>
-
-        <div className="secure-main">
-          <div className="secure-chat">
-            {messages.map((message, index) => (
-              <div key={index} className={`secure-message ${message.role}`}>
-                <p>{message.text}</p>
-              </div>
-            ))}
-          </div>
-
-          <aside className="auth-panel">
-            <div className="auth-orbit">
-              <AvatarMark user={previewUser} size="lg" />
-              <button aria-label="تغيير الصورة الرمزية"><Camera size={17} /></button>
-            </div>
-            <div className="lock-row"><ShieldCheck size={18} /> حساب محمي برقم الجوال</div>
-            <h1>{authStep === "complete" ? "رصيدك جاهز" : "أنشئ حسابك خلال دقيقة"}</h1>
-            <p>{authStep === "complete" ? "تم التحقق من رقم الجوال وتم إضافة رصيد الترحيب إلى المحفظة." : "أي شخص يقدر يبدأ مجاناً. بعد توثيق رقم الجوال تحصل على 30 ريال داخل وصلة."}</p>
-
-            <div className="auth-status-strip">
-              <span className={authStep !== "signup" ? "done" : "active"}><UserPlus size={15} /> الحساب</span>
-              <span className={authStep === "complete" ? "done" : authStep === "verify" ? "active" : ""}><Smartphone size={15} /> التحقق</span>
-              <span className={authStep === "complete" ? "done" : ""}><Gift size={15} /> 30 ر.س</span>
-            </div>
-
-            {authStep === "signup" && (
-              <div className="auth-fields">
-                <label>
-                  <span>اسمك</span>
-                  <input value={authForm.name} onChange={(event) => setAuthForm((current) => ({ ...current, name: event.target.value }))} placeholder="مثال: عبدالعزيز" />
-                </label>
-                <label>
-                  <span>اسم الشركة</span>
-                  <input value={authForm.business} onChange={(event) => setAuthForm((current) => ({ ...current, business: event.target.value }))} placeholder="مثال: عيادة النمو" />
-                </label>
-                <label>
-                  <span>رقم الجوال</span>
-                  <input value={authForm.phone} onChange={(event) => setAuthForm((current) => ({ ...current, phone: event.target.value }))} placeholder="+966 5X XXX XXXX" />
-                </label>
-                <button className="create-account" onClick={startAccount}><UserPlus size={17} /> إنشاء الحساب</button>
-              </div>
-            )}
-
-            {authStep === "verify" && (
-              <div className="auth-fields">
-                <div className="otp-card">
-                  <Smartphone size={18} />
-                  <div><strong>{user?.phone}</strong><span>رمز التجربة: {otpHint}</span></div>
-                </div>
-                <label>
-                  <span>رمز التحقق</span>
-                  <input value={otp} onChange={(event) => setOtp(event.target.value)} inputMode="numeric" maxLength={4} placeholder="2468" />
-                </label>
-                <button className="create-account" onClick={verifyPhone}><CheckCircle2 size={17} /> توثيق وإضافة الرصيد</button>
-              </div>
-            )}
-
-            <div className="limit-grid">
-              <div><strong>20</strong><span>عميل كحد أقصى لكل جلب</span></div>
-              <div><strong>{user?.verifiedPhone ? "30 ر.س" : "0 ر.س"}</strong><span>رصيد المحفظة الحالي</span></div>
-              <div><strong>{user?.verifiedPhone ? "موثق" : "بانتظار"}</strong><span>حالة رقم الجوال</span></div>
-            </div>
-            <button className="fetch-button" onClick={fetchFreeLeads} disabled={busy || intake.confidence < 100 || !user?.verifiedPhone}>
-              <Search size={17} /> جلب 20 عميل الآن
-            </button>
-            <Link to="/console" className="wallet-link"><Wallet size={16} /> فتح الكونسول والمحفظة</Link>
-          </aside>
-        </div>
-
-        <div className="secure-composer">
-          <button aria-label="إضافة"><Sparkles size={23} /></button>
-          <input
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={(event) => event.key === "Enter" && sendSecureMessage()}
-            placeholder="اكتب تفاصيل أكثر عن العميل المثالي..."
-          />
-          <button onClick={() => sendSecureMessage()} aria-label="إرسال"><ArrowRight size={20} /></button>
-        </div>
-      </section>
-    </main>
-  );
-}
-function buildPipeline(items: Lead[]) {
-  const counts = items.reduce<Record<string, number>>((acc, lead) => {
-    acc[lead.status] = (acc[lead.status] ?? 0) + 1;
-    return acc;
-  }, {});
-  return Object.entries(counts).map(([status, count]) => ({ status, count }));
+  return labels[status][language];
 }
 
-function buildIndustryData(items: Lead[]) {
-  const counts = items.reduce<Record<string, number>>((acc, lead) => {
-    acc[lead.industry] = (acc[lead.industry] ?? 0) + 1;
-    return acc;
-  }, {});
-  return Object.entries(counts).map(([name, value]) => ({ name, value }));
+function adminLeadToLead(lead: AdminLead): Lead {
+  const status: Lead["status"] = lead.qualification_status === "qualified"
+    ? "qualified"
+    : lead.qualification_status === "contacted"
+      ? "contacted"
+      : lead.qualification_status === "proposal"
+        ? "proposal"
+        : lead.enrichment_status === "enriched"
+          ? "researching"
+          : "new";
+  const revenue = Number(String(lead.annual_revenue || "0").replace(/[^0-9.-]/g, ""));
+  return {
+    id: lead.id,
+    name: lead.name || lead.company,
+    title: lead.title || lead.seniority || "Company record",
+    company: lead.company,
+    email: lead.email || "",
+    phone: lead.phone || undefined,
+    location: lead.location || "Saudi Arabia",
+    source: lead.source,
+    status,
+    fitScore: lead.fit_score,
+    revenueEstimate: Number.isFinite(revenue) ? revenue : 0,
+    employees: lead.company_size || 0,
+    industry: lead.industry || "Unclassified",
+    companySlug: lead.company.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
+    lastSeenUpdateAt: lead.last_enriched_at || lead.updated_at || lead.created_at,
+    tags: lead.enrichment_signals || [],
+  };
+}
+
+function groupItems<T>(items: T[], getLabel: (item: T) => string) {
+  const grouped = new Map<string, { label: string; count: number }>();
+  items.forEach((item) => {
+    const label = getLabel(item) || "Unknown";
+    grouped.set(label, { label, count: (grouped.get(label)?.count || 0) + 1 });
+  });
+  return [...grouped.values()].sort((a, b) => b.count - a.count);
+}
+
+function topGroup<T>(items: T[], getLabel: (item: T) => string) {
+  return groupItems(items, getLabel)[0] ?? { label: "No data", count: 0 };
 }
 
 function money(value: number) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "SAR", maximumFractionDigits: 0 }).format(value);
 }
 
 export default App;

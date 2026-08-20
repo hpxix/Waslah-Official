@@ -7,32 +7,16 @@ services:
     image: waslah/frontend:local
     container_name: waslah_frontend
     depends_on:
-      directus:
-        condition: service_healthy
+      directus-bootstrap:
+        condition: service_completed_successfully
     ports:
       - "${FRONTEND_PORT:-3000}:80"
     networks:
       - waslah
     restart: unless-stopped
 
-  frontend_alt:
-    build:
-      context: .
-      args:
-        VITE_DIRECTUS_URL: /directus
-    image: waslah/frontend:alt
-    container_name: waslah_frontend_alt
-    depends_on:
-      directus:
-        condition: service_healthy
-    ports:
-      - "${FRONTEND_ALT_PORT:-3001}:80"
-    networks:
-      - waslah
-    restart: unless-stopped
-
   directus:
-    image: directus/directus:11
+    image: directus/directus:11.17.4
     container_name: waslah_directus
     depends_on:
       postgres:
@@ -58,11 +42,12 @@ services:
       CACHE_ENABLED: "true"
       CACHE_STORE: "redis"
       REDIS: "redis://redis:6379"
-      ADMIN_EMAIL: "${DIRECTUS_ADMIN_EMAIL:-admin@waslah.local}"
+      ADMIN_EMAIL: "${DIRECTUS_ADMIN_EMAIL:-bootstrap@waslah.ai}"
       ADMIN_PASSWORD: "${DIRECTUS_ADMIN_PASSWORD:-change-me-now}"
       CORS_ENABLED: "true"
-      CORS_ORIGIN: "http://localhost:${FRONTEND_PORT:-3000},http://127.0.0.1:${FRONTEND_PORT:-3000}"
+      CORS_ORIGIN: "${DIRECTUS_CORS_ORIGIN:-http://localhost:3000,http://127.0.0.1:3000}"
       WEBSOCKETS_ENABLED: "true"
+      WASLAH_CUSTOMER_ROLE_ID: "${WASLAH_CUSTOMER_ROLE_ID:-8c62f1c4-258c-4d77-92f2-33f87db31765}"
     volumes:
       - directus_uploads:/directus/uploads
       - ./directus/extensions:/directus/extensions
@@ -75,6 +60,66 @@ services:
       timeout: 5s
       retries: 20
       start_period: 30s
+    restart: unless-stopped
+
+  directus-bootstrap:
+    image: node:22-alpine
+    container_name: waslah_directus_bootstrap
+    working_dir: /bootstrap
+    command: ["node", "/bootstrap/bootstrap.mjs"]
+    depends_on:
+      directus:
+        condition: service_healthy
+    env_file:
+      - .env.docker
+    environment:
+      DIRECTUS_INTERNAL_URL: "http://directus:8055"
+      DIRECTUS_ADMIN_EMAIL: "${DIRECTUS_ADMIN_EMAIL:-bootstrap@waslah.ai}"
+      DIRECTUS_ADMIN_PASSWORD: "${DIRECTUS_ADMIN_PASSWORD:-change-me-now}"
+      WASLAH_CUSTOMER_ROLE_ID: "${WASLAH_CUSTOMER_ROLE_ID:-8c62f1c4-258c-4d77-92f2-33f87db31765}"
+    volumes:
+      - ./directus:/bootstrap:ro
+    networks:
+      - waslah
+    restart: "no"
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:2.32.7
+    container_name: waslah_n8n
+    profiles: ["automation"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      directus-bootstrap:
+        condition: service_completed_successfully
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    env_file:
+      - .env.docker
+    environment:
+      DB_TYPE: "postgresdb"
+      DB_POSTGRESDB_HOST: "postgres"
+      DB_POSTGRESDB_PORT: "5432"
+      DB_POSTGRESDB_DATABASE: "${POSTGRES_DB:-waslah}"
+      DB_POSTGRESDB_USER: "${POSTGRES_USER:-waslah}"
+      DB_POSTGRESDB_PASSWORD: "${POSTGRES_PASSWORD:-waslah_dev_password}"
+      DB_POSTGRESDB_SCHEMA: "n8n"
+      N8N_HOST: "${N8N_HOST:-localhost}"
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: "${N8N_PROTOCOL:-http}"
+      N8N_EDITOR_BASE_URL: "${N8N_EDITOR_BASE_URL:-http://localhost:5678}"
+      WEBHOOK_URL: "${N8N_WEBHOOK_URL:-http://localhost:5678/}"
+      WASLAH_DIRECTUS_INTERNAL_URL: "http://directus:8055"
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      GENERIC_TIMEZONE: "Asia/Riyadh"
+      TZ: "Asia/Riyadh"
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: "168"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n/workflows:/workflows:ro
+    networks:
+      - waslah
     restart: unless-stopped
 
   postgres:
@@ -122,3 +167,4 @@ volumes:
   postgres_data:
   redis_data:
   directus_uploads:
+  n8n_data:

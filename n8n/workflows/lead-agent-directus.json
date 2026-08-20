@@ -1,0 +1,197 @@
+{
+  "name": "Waslah Lead Agent - Directus + Apify + Vapi",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "waslah-lead-agent",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "c55a1f87-7bcc-4ea9-9828-4f0aef09fbea",
+      "name": "Directus Request Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1080, 0],
+      "webhookId": "waslah-lead-agent"
+    },
+    {
+      "parameters": {
+        "jsCode": "const expected = `Bearer ${$env.N8N_WEBHOOK_SECRET}`;\nconst supplied = $json.headers?.authorization;\nif (!expected || supplied !== expected) throw new Error('Invalid Waslah workflow secret');\nconst payload = $json.body ?? $json;\nif (payload.event !== 'lead.request.created' || !payload.request?.id) throw new Error('Invalid lead request event');\nreturn [{ json: { request: payload.request } }];"
+      },
+      "id": "bc5b6586-d7a9-4bed-887a-c9f19b6a60cf",
+      "name": "Validate Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-840, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.apify.com/v2/acts/' + $env.APIFY_ACTOR_ID + '/run-sync-get-dataset-items' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.APIFY_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { ...($json.request.criteria || {}), maxCrawledPlacesPerSearch: Math.min($json.request.target_count || 20, 100) } }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "784c82c2-fc4d-4aaf-b08b-e4312b06099c",
+      "name": "Run Apify Actor",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-600, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().flatMap((item) => Array.isArray(item.json) ? item.json : [item.json]);\nconst leads = rows.slice(0, 100).map((row) => ({\n  name: row.contactName || row.name || row.title || null,\n  title: row.jobTitle || row.categoryName || null,\n  company: row.companyName || row.title || row.name || 'Unknown company',\n  email: row.email || row.emails?.[0] || null,\n  phone: row.phone || row.phoneNumber || null,\n  website: row.website || row.url || null,\n  location: [row.city, row.state, row.countryCode || row.country].filter(Boolean).join(', ') || row.address || null,\n  industry: row.industry || row.categoryName || row.category || null,\n  source: 'apify',\n  source_reference: row.placeId || row.id || row.url || null,\n  fit_score: row.fitScore || 0,\n  raw: row\n}));\nreturn [{ json: { request: $('Validate Request').first().json.request, leads } }];"
+      },
+      "id": "5f5a5099-e4c3-4fde-ac5d-a2ce78450f71",
+      "name": "Normalize Leads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-360, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.WASLAH_DIRECTUS_INTERNAL_URL + '/lead-agent/integrations/leads' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Waslah-Workflow-Secret",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { request_id: $json.request.id, provider_job_id: $execution.id, leads: $json.leads } }}",
+        "options": {}
+      },
+      "id": "9fe83ca3-4ef0-4c5b-8bb5-b4d8cc2d454a",
+      "name": "Store in Directus",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-120, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const request = $('Validate Request').first().json.request;\nconst candidates = $json.data?.call_candidates || $json.call_candidates || [];\nreturn candidates.map((candidate) => ({ json: { ...candidate, request_id: request.id, organization_id: request.organization_id } }));"
+      },
+      "id": "29571396-a4b0-49af-86cb-a0c25ee2dfbb",
+      "name": "Prepare Call Candidates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [120, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.vapi.ai/call",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.VAPI_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { assistantId: $env.VAPI_ASSISTANT_ID, phoneNumberId: $env.VAPI_PHONE_NUMBER_ID, customer: { number: $json.phone }, metadata: { organization_id: $json.organization_id, request_id: $json.request_id, lead_id: $json.lead_id }, assistantOverrides: { variableValues: { leadName: $json.name || '', companyName: $json.company || '' } } } }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 2000
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "1d765769-0d34-45a8-ae92-cd0c403c2889",
+      "name": "Create Vapi Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [360, 0],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.WASLAH_DIRECTUS_INTERNAL_URL + '/lead-agent/integrations/calls' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Waslah-Workflow-Secret",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { request_id: $json.metadata.request_id, lead_id: $json.metadata.lead_id, provider_call_id: $json.id, status: $json.status || 'queued' } }}",
+        "options": {}
+      },
+      "id": "a38a84a0-31a4-4ef0-aab0-2fba57d1ad2f",
+      "name": "Register Vapi Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [600, 0]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Directus Request Webhook": {
+      "main": [[{ "node": "Validate Request", "type": "main", "index": 0 }]]
+    },
+    "Validate Request": {
+      "main": [[{ "node": "Run Apify Actor", "type": "main", "index": 0 }]]
+    },
+    "Run Apify Actor": {
+      "main": [[{ "node": "Normalize Leads", "type": "main", "index": 0 }]]
+    },
+    "Normalize Leads": {
+      "main": [[{ "node": "Store in Directus", "type": "main", "index": 0 }]]
+    },
+    "Store in Directus": {
+      "main": [[{ "node": "Prepare Call Candidates", "type": "main", "index": 0 }]]
+    },
+    "Prepare Call Candidates": {
+      "main": [[{ "node": "Create Vapi Call", "type": "main", "index": 0 }]]
+    },
+    "Create Vapi Call": {
+      "main": [[{ "node": "Register Vapi Call", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": true,
+    "timezone": "Asia/Riyadh"
+  },
+  "versionId": "350f7adf-7f1a-4739-b3bb-b1161a492fd0",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
