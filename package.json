@@ -9,6 +9,8 @@
     "preview": "vite preview --host 0.0.0.0",
     "lint": "eslint .",
     "test:smoke:lead-agent": "node scripts/smoke-lead-agent.mjs",
+    "test:b2c": "node scripts/test-b2c.mjs",
+    "test:growth": "node --test scripts/test-growth.mjs",
     "data:import:starter": "node scripts/import-starter-leads.mjs",
     "docker:up": "docker compose up --build",
     "docker:dev": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build frontend-dev directus postgres redis",
@@ -28,6 +30,7 @@
     "lucide-react": "^0.539.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
+    "react-markdown": "^10.1.0",
     "react-router": "^7.8.0",
     "recharts": "^3.1.2",
     "vite": "^7.1.2"

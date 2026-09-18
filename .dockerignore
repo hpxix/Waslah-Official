@@ -4,6 +4,7 @@ dist
 .DS_Store
 .env
 .env.local
+.env.relevance
 .env.*.local
 npm-debug.log*
 docker-data

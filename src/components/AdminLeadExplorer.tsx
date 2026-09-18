@@ -21,6 +21,7 @@ import { useEffect, useMemo, useState } from "react";
 import { apiErrorMessage, fetchAdminLeads } from "../lib/directus";
 import type { AdminLead, AdminLeadResponse } from "../lib/directus";
 import { useLanguage } from "../i18n";
+import { sourceLabel } from "../lib/sourceLabel";
 
 type ViewMode = "grid" | "list" | "table";
 
@@ -112,7 +113,7 @@ export function AdminLeadExplorer({ onInventoryLoaded }: { onInventoryLoaded?: (
         </select>
         <select value={source} onChange={(event) => setSource(event.target.value)} aria-label={language === "ar" ? "المصدر" : "Source"}>
           <option value="all">{language === "ar" ? "كل المصادر" : "All sources"}</option>
-          {sourceOptions.map((item) => <option key={item.value} value={item.value}>{item.value} ({item.count})</option>)}
+          {sourceOptions.map((item) => <option key={item.value} value={item.value}>{sourceLabel(item.value, language)} ({item.count})</option>)}
         </select>
         <select value={sort} onChange={(event) => setSort(event.target.value)} aria-label={language === "ar" ? "الترتيب" : "Sort leads"}>
           <option value="enrichment_score">{language === "ar" ? "الأعلى إثراء" : "Highest enrichment"}</option>
@@ -182,7 +183,7 @@ function LeadRow({ lead, language, onOpen, table }: { lead: AdminLead; language:
       <span className="admin-lead-row__company"><LeadImage lead={lead} company /><span><strong>{lead.company}</strong><small>{lead.industry || "-"}</small></span></span>
       <span className="admin-lead-row__contact"><strong>{lead.email || lead.phone || "-"}</strong><small>{lead.location || "-"}</small></span>
       <span className={`admin-enrichment is-${lead.enrichment_status}`}><i /> {lead.enrichment_score}%</span>
-      <span className="admin-lead-row__source">{lead.source}</span>
+      <span className="admin-lead-row__source">{sourceLabel(lead.source, language)}</span>
       {language === "ar" ? <ArrowLeft size={14} /> : <ArrowRight size={14} />}
     </button>
   );

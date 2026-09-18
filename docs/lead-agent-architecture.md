@@ -9,6 +9,10 @@ flowchart LR
   D -->|"signed request event"| N["n8n orchestration"]
   N --> A1["Apify sourcing"]
   A1 -->|"normalized leads"| D
+  D -->|"validated B2C plan"| H["Haraj fixed GraphQL queries"]
+  H --> C["candidate filter and qualification"]
+  C -->|"qualified post IDs only"| HC["Haraj contact resolution"]
+  HC -->|"seller-level dedupe"| D
   N -->|"rate-limited calls"| V["Vapi"]
   V -->|"authenticated events"| D
   D -->|"masked previews / granted contacts"| A
@@ -16,6 +20,8 @@ flowchart LR
 ```
 
 Directus owns identity, tenant boundaries, leads, wallet accounting, call artifacts, and audit events. n8n coordinates external work but is never the source of truth. If an n8n execution fails, the Directus request and outbox event remain available for retry.
+
+Sell-mode consumer requests use the B2C branch directly inside the lead-agent endpoint. The language model creates structured intent but cannot issue GraphQL. The server validates every selected tag against the bundled Haraj taxonomy, uses fixed queries, qualifies posts before contact lookup, and merges evidence at seller level.
 
 ## Request Lifecycle
 
@@ -25,7 +31,9 @@ Directus owns identity, tenant boundaries, leads, wallet accounting, call artifa
 4. Directus fingerprints each result, updates or creates the canonical lead, and links it to the customer request.
 5. n8n starts Vapi calls at a controlled rate and registers each provider call ID in Directus.
 6. Vapi posts status and end-of-call events directly to Directus. Duplicate events are ignored.
-7. Customers see masked results. A reveal creates an immutable 1 SAR debit and a durable access grant in one database transaction.
+7. Customers see masked results. A reveal consumes 10 credits (1 SAR), creating an immutable debit and durable access grant in one database transaction.
+
+Administrators grant credit by creating a `credit_grants` item in Directus with the customer's email, credit amount, and reason. A server hook resolves the customer workspace and atomically updates both the wallet and immutable ledger. The grant becomes `processed` or records a failure reason.
 
 ## Capacity Target
 

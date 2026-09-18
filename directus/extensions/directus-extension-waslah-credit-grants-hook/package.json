@@ -1,0 +1,13 @@
+{
+  "name": "directus-extension-waslah-credit-grants-hook",
+  "version": "1.0.0",
+  "description": "Processes administrator-created Waslah credit grants into wallet balances.",
+  "type": "module",
+  "files": ["dist"],
+  "directus:extension": {
+    "type": "hook",
+    "path": "dist/index.js",
+    "source": "",
+    "host": ">=11.0.0 <13.0.0"
+  }
+}

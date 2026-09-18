@@ -167,7 +167,7 @@
   --ops-text: #f2f3f3;
   --ops-muted: #92979e;
   --ops-subtle: #696e75;
-  --ops-green: #43d17b;
+  --ops-green: #c7cbd0;
   --ops-blue: #6ea8fe;
   --ops-amber: #e5b85c;
   background: var(--ops-bg);
@@ -363,7 +363,7 @@
 #root .ops-system__services i {
   background: var(--ops-green);
   border-radius: 50%;
-  box-shadow: 0 0 0 3px rgba(67, 209, 123, 0.12);
+  box-shadow: 0 0 0 3px rgba(199, 203, 208, 0.2);
   display: inline-block;
   height: 6px;
   width: 6px;
@@ -457,7 +457,7 @@
   gap: 5px;
 }
 
-#root .hconsole-context span svg { color: var(--ops-green); fill: rgba(67, 209, 123, 0.18); }
+#root .hconsole-context span svg { color: var(--ops-green); fill: rgba(199, 203, 208, 0.2); }
 #root .hconsole-context strong { font-size: 14px; font-weight: 600; }
 #root .hconsole-actions { align-items: center; display: flex; flex-wrap: nowrap; gap: 8px; }
 

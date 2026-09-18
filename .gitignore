@@ -1,41 +1,76 @@
 # Dependencies
+
 node_modules/
+node_modules/.cache/
 
 # Production builds
+
 dist/
 build/
 .vite/
 
+# Keep built Directus extensions tracked
+
+!directus/extensions/directus-extension-waslah-lead-agent/dist/
+!directus/extensions/directus-extension-waslah-lead-agent/dist/index.js
+!directus/extensions/directus-extension-waslah-lead-agent/dist/b2c.js
+!directus/extensions/directus-extension-waslah-lead-agent/dist/data/
+!directus/extensions/directus-extension-waslah-lead-agent/dist/data/haraj_tags.json
+
+!directus/extensions/directus-extension-waslah-credit-grants-hook/dist/
+!directus/extensions/directus-extension-waslah-credit-grants-hook/dist/index.js
+
 # Environment and secrets
+
 .env
 .env.local
 .env.*.local
 .env.docker
+.env.haraj
+.env.relevance
+
+# Safe environment templates
+
 !.env.example
 !.env.docker.example
 
 # Logs
+
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# OS/editor noise
+# OS / editor noise
+
 .DS_Store
 Thumbs.db
 .idea/
+
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
 
-# Runtime data
+# Runtime / persistent Docker data
+
 docker-data/
 directus/uploads/
 postgres_data/
 redis_data/
 
-# TypeScript/cache artifacts
+# TypeScript / test artifacts
+
 *.tsbuildinfo
-node_modules/.cache/
 coverage/
+
+# Independently versioned / duplicate frontend workspaces
+
+/waslah-frontend/
+/waslah-frontend Green/
+/waslah-frontend Green.zip
+
+# Graphify generated knowledge graph
+
+graphify-out/
+

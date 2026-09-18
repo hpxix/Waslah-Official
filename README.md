@@ -1,16 +1,19 @@
-# Waslah AI Lead CRM
+# Waslah AI Growth Operating System
 
-A multi-tenant lead-agent platform with a React CRM, Directus system of record, n8n orchestration, Apify sourcing, and Vapi qualification calls.
+A multi-tenant growth platform that keeps Wasla's lead agent at the center, then turns its business understanding into audience intelligence, content, customer conversations, and a live revenue journey.
 
 - ChatGPT-style lead intake that clarifies the target audience before Apify runs.
-- Phone-verified accounts with an idempotent 30 SAR welcome-credit ledger.
+- Persistent Business DNA shared by the lead agent, content creator, and customer-reply copilot.
+- Motivation-based B2B/B2C audience segmentation and an animated customer funnel.
+- Approval-controlled content generation and Postiz social scheduling.
+- A Chatwoot-powered unified inbox with Business-DNA-aware reply drafts.
+- Phone-verified accounts with an idempotent 100 SAR / 30-lead welcome offer.
 - Google, Microsoft, and Apple account creation through Directus SSO with mandatory phone verification.
 - Shared, deduplicated lead inventory with masked previews and workspace access grants.
 - Apify lead gathering and rate-limited Vapi calling through an importable n8n workflow.
 - Append-only provider events, call attempts, structured qualifications, and retryable outbox records.
 - On-demand Perplexity company research with slugs and company intelligence.
-- CRM overview, lead table, PowerBI-style insight dashboard, proposal workspace, and email-template library.
-- Email marketing actions with three free templates and premium-locked templates.
+- CRM overview, searchable lead table, growth command center, proposal workspace, secure social settings, and a bilingual quickstart tutorial.
 
 ## Run With Docker
 

@@ -195,8 +195,8 @@ export function AuthDialog({ initialMode = "signup", open, user, onClose, onAuth
       setStep("verify");
       launchConfetti();
       onCelebration(language === "ar"
-        ? { title: `حياك الله يا ${account.name.split(" ")[0]}`, body: "تم ربط حسابك وإنشاء مساحة وصلة. وثّق الجوال لتفعيل 30 ر.س." }
-        : { title: `Welcome, ${account.name.split(" ")[0]}`, body: "Your account is connected and Wasla workspace created. Verify your phone to activate 30 SAR." });
+        ? { title: `حياك الله يا ${account.name.split(" ")[0]}`, body: "تم ربط حسابك وإنشاء مساحة وصلة. رصيد البداية جاهز ويمكنك تخطي توثيق الجوال الآن." }
+        : { title: `Welcome, ${account.name.split(" ")[0]}`, body: "Your account is connected and your starter credit is ready. You can skip phone verification for now." });
     } catch (cause) {
       setError(apiErrorMessage(cause, language === "ar" ? "تعذر إنشاء مساحة الحساب الاجتماعي." : "We could not create your social workspace."));
     } finally {
@@ -237,8 +237,8 @@ export function AuthDialog({ initialMode = "signup", open, user, onClose, onAuth
       setStep("verify");
       launchConfetti();
       onCelebration(language === "ar"
-        ? { title: `حياك الله يا ${account.name.split(" ")[0]}`, body: "تم إنشاء مساحة وصلة بنجاح. بقي توثيق الجوال لتفعيل رصيد 30 ر.س." }
-        : { title: `Welcome, ${account.name.split(" ")[0]}`, body: "Your Wasla workspace is ready. Verify your phone to activate your 30 SAR credit." });
+        ? { title: `حياك الله يا ${account.name.split(" ")[0]}`, body: "تم إنشاء مساحة وصلة ورصيد البداية جاهز. يمكنك تخطي توثيق الجوال والبدء الآن." }
+        : { title: `Welcome, ${account.name.split(" ")[0]}`, body: "Your Wasla workspace and starter credit are ready. You can skip phone verification and start now." });
     } catch (cause) {
       setError(apiErrorMessage(cause, language === "ar" ? "تعذر إنشاء الحساب. راجع البيانات وحاول مرة أخرى." : "We could not create the account. Check your details and try again."));
     } finally {
@@ -285,12 +285,28 @@ export function AuthDialog({ initialMode = "signup", open, user, onClose, onAuth
       window.localStorage.setItem(`wasla:onboarding:${account.id}`, "pending");
       launchConfetti();
       onCelebration(language === "ar"
-        ? { title: "رصيدك جاهز", body: "تم توثيق الجوال وإضافة 30 ر.س. سنريك الآن كيف تطلق أول طلب عملاء." }
-        : { title: "Your credit is ready", body: "Phone verified and 30 SAR added. Next, we will show you how to launch your first lead request." });
+        ? { title: "تم توثيق جوالك", body: "حسابك موثّق ورصيد البداية متاح. سنريك الآن كيف تطلق أول طلب عملاء." }
+        : { title: "Your phone is verified", body: "Your account is verified and your starter credit is available. Next, we will show you how to launch your first lead request." });
       onReady(account);
       onClose();
     } catch (cause) {
       setError(apiErrorMessage(cause, language === "ar" ? "رمز التحقق غير صحيح أو انتهت صلاحيته." : "The verification code is incorrect or has expired."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function continueWithoutVerification() {
+    setBusy(true);
+    setError("");
+    try {
+      const account = accountToAuthUser(await getAccount());
+      onAuthenticated(account);
+      window.localStorage.setItem(`wasla:onboarding:${account.id}`, "pending");
+      onReady(account);
+      onClose();
+    } catch (cause) {
+      setError(apiErrorMessage(cause, language === "ar" ? "تعذر فتح مساحة العمل." : "We could not open your workspace."));
     } finally {
       setBusy(false);
     }
@@ -406,7 +422,8 @@ export function AuthDialog({ initialMode = "signup", open, user, onClose, onAuth
                 {t("auth.verifyButton")}
               </button>
               <button className="auth-dialog__resend" onClick={sendVerification} disabled={busy}>{t("auth.resend")}</button>
-              <div className="auth-dialog__credit"><Gift size={18} /><div><strong>{language === "ar" ? "30 ر.س هدية البداية" : "30 SAR welcome credit"}</strong><span>{language === "ar" ? "تُضاف مرة واحدة بعد التوثيق" : "Added once after phone verification"}</span></div></div>
+              <button className="auth-dialog__resend" onClick={continueWithoutVerification} disabled={busy}>{language === "ar" ? "تخطَّ الآن وابدأ البحث" : "Skip for now and start searching"}</button>
+              <div className="auth-dialog__credit"><Gift size={18} /><div><strong>{language === "ar" ? "رصيد البداية جاهز" : "Starter credit is ready"}</strong><span>{language === "ar" ? "يمكنك توليد العملاء الآن، والتوثيق اختياري" : "You can generate leads now; verification is optional"}</span></div></div>
             </div>
           )}
         </div>
