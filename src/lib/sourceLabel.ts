@@ -1,6 +1,7 @@
 export function sourceLabel(source: string | null | undefined, language: "ar" | "en") {
   const value = String(source || "").trim();
   if (!value) return language === "ar" ? "مصدر أعمال موثوق" : "Verified business source";
+  if (/b2c/i.test(value)) return language === "ar" ? "عميل B2C" : "B2C lead";
   if (/google maps|places/i.test(value)) return language === "ar" ? "دليل أعمال محلي" : "Local business directory";
   if (/linkedin/i.test(value)) return language === "ar" ? "شبكة أعمال مهنية" : "Professional business network";
   if (/instagram|facebook|social/i.test(value)) return language === "ar" ? "ملف أعمال عام" : "Public business profile";

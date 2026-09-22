@@ -1,0 +1,60 @@
+#root .business-persona{width:min(1400px,calc(100% - 56px));margin:0 auto;padding:32px 0 140px;color:#fafafa;font-family:"Instrument Sans",sans-serif}
+#root .business-persona *{box-sizing:border-box}
+#root .business-persona__hero{position:relative;display:grid;grid-template-columns:minmax(0,1fr) 230px;min-height:260px;align-items:center;gap:44px;overflow:hidden;padding:42px 48px;border:1px solid #303035;border-radius:22px;background:radial-gradient(circle at 85% 20%,rgba(255,255,255,.085),transparent 24%),linear-gradient(145deg,#19191c,#111113 72%);box-shadow:0 28px 90px rgba(0,0,0,.32)}
+#root .business-persona__hero:after{position:absolute;right:-100px;bottom:-190px;width:430px;height:430px;border:1px solid rgba(255,255,255,.06);border-radius:50%;content:""}
+#root .business-persona__hero>div:first-child{position:relative;z-index:1;max-width:820px}
+#root .business-persona__hero>div:first-child>span{display:flex;align-items:center;gap:9px;color:#a1a1aa;font:700 11px/1 "Geist Mono",monospace;letter-spacing:.16em;text-transform:uppercase}
+#root .business-persona__hero h1{max-width:760px;margin:24px 0 16px;font:620 clamp(44px,4.3vw,68px)/.98 "Instrument Sans",sans-serif;letter-spacing:-.055em}
+#root .business-persona__hero p{max-width:720px;margin:0;color:#a1a1aa;font:400 16px/1.65 "Instrument Sans",sans-serif}
+#root .business-persona__score{position:relative;z-index:1;align-self:center;padding:22px;border:1px solid #3f3f46;border-radius:16px;background:rgba(9,9,11,.82);box-shadow:0 14px 40px rgba(0,0,0,.24)}
+#root .business-persona__score>div{display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
+#root .business-persona__score strong{font:650 42px/1 "Instrument Sans",sans-serif;letter-spacing:-.055em}
+#root .business-persona__score small{max-width:86px;color:#71717a;font:650 9px/1.35 "Geist Mono",monospace;text-align:right;text-transform:uppercase}
+#root .business-persona__score i{display:block;height:5px;margin-top:22px;overflow:hidden;border-radius:99px;background:#27272a}
+#root .business-persona__score i span{display:block;height:100%;min-width:4px;border-radius:inherit;background:#f4f4f5;transition:width .4s ease}
+#root .business-persona__grid{display:grid;grid-template-columns:minmax(0,.88fr) minmax(0,1.12fr);gap:18px;margin-top:18px}
+#root .persona-upload-card,#root .persona-summary,#root .persona-documents{border:1px solid #303035;border-radius:18px;background:#141416;box-shadow:0 16px 46px rgba(0,0,0,.16)}
+#root .persona-upload-card{display:flex;min-height:370px;flex-direction:column;padding:18px}
+#root .persona-upload-card>button{display:flex;min-height:300px;flex:1;cursor:pointer;flex-direction:column;align-items:center;justify-content:center;padding:30px;border:1px dashed #52525b;border-radius:13px;background:#111113;color:#f4f4f5;font-family:"Instrument Sans",sans-serif;text-align:center;transition:border-color .18s ease,background .18s ease,transform .18s ease}
+#root .persona-upload-card>button:hover:not(:disabled){border-color:#a1a1aa;background:#19191c;transform:translateY(-1px)}
+#root .persona-upload-card>button svg{width:28px;height:28px;margin-bottom:18px;color:#d4d4d8}
+#root .persona-upload-card>button strong{max-width:280px;font-size:21px;line-height:1.2}
+#root .persona-upload-card>button span{max-width:330px;margin-top:10px;color:#71717a;font:400 12px/1.55 "Instrument Sans",sans-serif}
+#root .persona-upload-card>small{display:block;padding:14px 8px 0;color:#71717a;font:400 12px/1.45 "Instrument Sans",sans-serif;text-align:center}
+#root .persona-summary{min-height:370px;padding:28px}
+#root .persona-summary>header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-bottom:20px;border-bottom:1px solid #29292d}
+#root .persona-summary>header span{display:flex;align-items:center;gap:8px;color:#a1a1aa;font:700 11px/1 "Geist Mono",monospace;letter-spacing:.1em;text-transform:uppercase}
+#root .persona-summary>header b{font:650 14px/1.2 "Instrument Sans",sans-serif}
+#root .persona-summary>svg{display:block;margin:100px auto;color:#71717a}
+#root .persona-summary dl{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:22px 0}
+#root .persona-summary dl div{min-height:92px;padding:15px 16px;border:1px solid #303034;border-radius:12px;background:#19191c}
+#root .persona-summary dt{margin-bottom:10px;color:#71717a;font:700 9px/1 "Geist Mono",monospace;letter-spacing:.12em;text-transform:uppercase}
+#root .persona-summary dd{margin:0;color:#e4e4e7;font:500 13px/1.45 "Instrument Sans",sans-serif;overflow-wrap:anywhere}
+#root .persona-summary>button{display:flex;width:100%;min-height:52px;cursor:pointer;align-items:center;justify-content:center;gap:8px;border:0;border-radius:11px;background:#fafafa;color:#09090b;font:700 14px/1 "Instrument Sans",sans-serif;transition:.18s ease}
+#root .persona-summary>button:not(:disabled):hover{background:#d4d4d8;transform:translateY(-1px)}
+#root .persona-summary>button:disabled{cursor:not-allowed;background:#27272a;color:#71717a}
+#root .persona-documents{margin-top:18px;overflow:hidden}
+#root .persona-documents>header{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:23px 28px;border-bottom:1px solid #29292d}
+#root .persona-documents h2{margin:0 0 6px;font:650 19px/1.2 "Instrument Sans",sans-serif;letter-spacing:-.02em}
+#root .persona-documents header p{margin:0;color:#71717a;font:400 12px/1.45 "Instrument Sans",sans-serif}
+#root .persona-documents>header>span{display:grid;min-width:36px;height:36px;place-items:center;border:1px solid #3f3f46;border-radius:10px;color:#a1a1aa;font:600 12px/1 "Geist Mono",monospace}
+#root .persona-documents__empty{display:flex;min-height:170px;align-items:center;justify-content:center;gap:10px;color:#71717a}
+#root .persona-documents__empty svg{width:18px}
+#root .persona-documents__empty strong{font:600 13px/1 "Instrument Sans",sans-serif}
+#root .persona-documents>article{display:grid;grid-template-columns:42px minmax(0,1fr) 36px;align-items:start;gap:14px;padding:18px 28px;border-bottom:1px solid #29292d}
+#root .persona-documents>article:last-child{border-bottom:0}
+#root .persona-document__icon{display:grid;width:40px;height:40px;place-items:center;border:1px solid #3f3f46;border-radius:10px;background:#1b1b1e;color:#a1a1aa}
+#root .persona-document__body>header{display:flex;align-items:center;justify-content:space-between;gap:16px}
+#root .persona-document__body>header strong{font:600 14px/1.3 "Instrument Sans",sans-serif}
+#root .persona-document__body>header span{padding:5px 8px;border:1px solid #3f3f46;border-radius:99px;color:#a1a1aa;font:600 9px/1 "Geist Mono",monospace;text-transform:uppercase}
+#root .persona-document__body>p{margin:9px 0;color:#a1a1aa;font:400 12px/1.55 "Instrument Sans",sans-serif}
+#root .persona-document__body>small{color:#71717a;font:400 11px/1.45 "Instrument Sans",sans-serif}
+#root .persona-unreadable{margin:10px 0;padding:11px 12px;border:1px solid #49382e;border-radius:9px;background:#1c1815;color:#c7a589}
+#root .persona-unreadable>strong{display:flex;align-items:center;gap:7px;font:600 11px/1.3 "Instrument Sans",sans-serif}
+#root .persona-unreadable p{margin:7px 0 0;font:400 11px/1.4 "Instrument Sans",sans-serif}
+#root .persona-documents>article>button{display:grid;width:34px;height:34px;cursor:pointer;place-items:center;border:1px solid #3f3f46;border-radius:9px;background:transparent;color:#71717a}
+#root .persona-documents>article>button:hover{background:#27272a;color:#f4f4f5}
+#root .business-persona .is-spinning{animation:persona-spin .8s linear infinite}
+@keyframes persona-spin{to{transform:rotate(360deg)}}
+@media(max-width:980px){#root .business-persona{width:min(100% - 28px,1400px);padding-top:18px}#root .business-persona__hero{grid-template-columns:1fr;padding:32px}#root .business-persona__score{width:min(100%,310px)}#root .business-persona__grid{grid-template-columns:1fr}}
+@media(max-width:580px){#root .business-persona__hero{min-height:auto;padding:25px}#root .business-persona__hero h1{font-size:40px}#root .business-persona__hero p{font-size:14px}#root .persona-summary{padding:20px}#root .persona-summary dl{grid-template-columns:1fr}#root .persona-documents>header,#root .persona-documents>article{padding-inline:18px}#root .persona-document__body>header{align-items:flex-start;flex-direction:column}}

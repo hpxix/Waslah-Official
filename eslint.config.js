@@ -5,7 +5,13 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
 export default [
-  { ignores: ["**/dist/**", "waslah-frontend Green/**"] },
+  {
+    ignores: [
+      "**/dist/**",
+      "waslah-frontend Green/**",
+      "waslah-frontend/**",
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

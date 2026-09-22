@@ -13,13 +13,14 @@ import {
   Phone,
   Rows3,
   Search,
-  Sparkles,
+  Target,
   Users,
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { apiErrorMessage, fetchAdminLeads } from "../lib/directus";
-import type { AdminLead, AdminLeadResponse } from "../lib/directus";
+import { createPortal } from "react-dom";
+import { apiErrorMessage, fetchAdminAccounts, fetchAdminLeads } from "../lib/directus";
+import type { AdminAccount, AdminLead, AdminLeadResponse } from "../lib/directus";
 import { useLanguage } from "../i18n";
 import { sourceLabel } from "../lib/sourceLabel";
 
@@ -27,7 +28,7 @@ type ViewMode = "grid" | "list" | "table";
 
 const emptyResponse: AdminLeadResponse = {
   data: [],
-  meta: { page: 1, limit: 24, total: 0, pages: 1, enrichment: {}, sources: [] },
+  meta: { page: 1, limit: 100, total: 0, pages: 1, enrichment: {}, sources: [], queries: [] },
 };
 
 function initials(value: string) {
@@ -42,27 +43,34 @@ function LeadImage({ lead, company = false }: { lead: AdminLead; company?: boole
   return <img className={`admin-lead-image${company ? " is-company" : ""}`} src={src} alt="" onError={() => setFailed(true)} />;
 }
 
-export function AdminLeadExplorer({ onInventoryLoaded }: { onInventoryLoaded?: (leads: AdminLead[], total: number) => void }) {
+export function AdminLeadExplorer({ onInventoryLoaded, onResearch }: { onInventoryLoaded?: (leads: AdminLead[], total: number) => void; onResearch?: (lead: AdminLead) => void }) {
   const { language } = useLanguage();
   const [response, setResponse] = useState<AdminLeadResponse>(emptyResponse);
+  const [accounts, setAccounts] = useState<AdminAccount[]>([]);
+  const [account, setAccount] = useState("all");
+  const [request, setRequest] = useState("all");
   const [search, setSearch] = useState("");
   const [enrichment, setEnrichment] = useState("all");
   const [source, setSource] = useState("all");
   const [sort, setSort] = useState("enrichment_score");
   const [page, setPage] = useState(1);
-  const [view, setView] = useState<ViewMode>("grid");
+  const [view, setView] = useState<ViewMode>("table");
   const [selected, setSelected] = useState<AdminLead | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
 
-  useEffect(() => setPage(1), [enrichment, search, sort, source]);
+  useEffect(() => setPage(1), [account, enrichment, request, search, sort, source]);
+
+  useEffect(() => {
+    fetchAdminAccounts().then(setAccounts).catch(() => setAccounts([]));
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       setBusy(true);
       setError("");
-      fetchAdminLeads({ search, enrichment, source, sort, page, limit: 24 })
+      fetchAdminLeads({ account, request, search, enrichment, source, sort, page, limit: 100 })
         .then((result) => {
           if (controller.signal.aborted) return;
           setResponse(result);
@@ -79,10 +87,11 @@ export function AdminLeadExplorer({ onInventoryLoaded }: { onInventoryLoaded?: (
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [enrichment, language, onInventoryLoaded, page, search, sort, source]);
+  }, [account, enrichment, language, onInventoryLoaded, page, request, search, sort, source]);
 
   const sourceOptions = useMemo(() => response.meta.sources, [response.meta.sources]);
   const enrichedCount = response.meta.enrichment.enriched || 0;
+  const selectedAccount = useMemo(() => accounts.find((item) => item.user_id === account), [account, accounts]);
 
   return (
     <section className="admin-inventory" aria-label={language === "ar" ? "مخزون العملاء الإداري" : "Admin lead inventory"}>
@@ -90,7 +99,13 @@ export function AdminLeadExplorer({ onInventoryLoaded }: { onInventoryLoaded?: (
         <div>
           <span><BadgeCheck size={14} /> {language === "ar" ? "وصول إداري" : "Admin access"}</span>
           <h1>{language === "ar" ? "مخزون العملاء" : "Lead inventory"}</h1>
-          <p>{language === "ar" ? `${response.meta.total} سجل في Directus · ${enrichedCount} مكتمل الإثراء` : `${response.meta.total} records in Directus · ${enrichedCount} fully enriched`}</p>
+          <p>{selectedAccount
+            ? language === "ar"
+              ? `${response.meta.total} عميلاً تم تسليمهم إلى ${selectedAccount.email}`
+              : `${response.meta.total} leads delivered to ${selectedAccount.email}`
+            : language === "ar"
+              ? `${response.meta.total} عملية تسليم عبر كل الحسابات · ${enrichedCount} مكتمل الإثراء`
+              : `${response.meta.total} deliveries across every account · ${enrichedCount} fully enriched`}</p>
         </div>
         <div className="admin-inventory__stats">
           <span><strong>{response.meta.total}</strong>{language === "ar" ? "كل العملاء" : "All leads"}</span>
@@ -100,9 +115,21 @@ export function AdminLeadExplorer({ onInventoryLoaded }: { onInventoryLoaded?: (
       </header>
 
       <div className="admin-inventory__toolbar">
+        <select className="admin-inventory__account" value={account} onChange={(event) => { setAccount(event.target.value); setRequest("all"); }} aria-label={language === "ar" ? "تصفية حسب الحساب" : "Filter by account"}>
+          <option value="all">{language === "ar" ? "كل الحسابات" : "All accounts"}</option>
+          {accounts.filter((item) => item.generated_leads > 0).map((item) => (
+            <option key={item.user_id} value={item.user_id}>{[item.first_name, item.last_name].filter(Boolean).join(" ") || item.email} · {item.organization_name} · {item.generated_leads} {language === "ar" ? "عميل" : "leads"}</option>
+          ))}
+        </select>
+        <select className="admin-inventory__query" value={request} onChange={(event) => setRequest(event.target.value)} disabled={account === "all"} aria-label={language === "ar" ? "اختر طلباً من الحساب" : "Choose a query from this account"}>
+          <option value="all">{account === "all" ? (language === "ar" ? "اختر الحساب أولاً" : "Choose an account first") : (language === "ar" ? "كل طلبات هذا الحساب" : "All queries from this account")}</option>
+          {response.meta.queries.map((item) => (
+            <option key={item.id} value={item.id}>{item.campaign_name || item.prompt} · {item.delivered_count}/{item.requested_count}</option>
+          ))}
+        </select>
         <label className="admin-inventory__search">
           <Search size={16} />
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={language === "ar" ? "ابحث بالاسم، الشركة، البريد، الجوال، القطاع أو المدينة" : "Search name, company, email, phone, industry, or city"} />
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={language === "ar" ? "ابحث بالعميل، الحساب، طلب العميل، البريد أو الجوال" : "Search lead, account, prompt, email, or phone"} />
           {search && <button onClick={() => setSearch("")} aria-label={language === "ar" ? "مسح البحث" : "Clear search"}><X size={14} /></button>}
         </label>
         <select value={enrichment} onChange={(event) => setEnrichment(event.target.value)} aria-label={language === "ar" ? "حالة الإثراء" : "Enrichment status"}>
@@ -135,12 +162,12 @@ export function AdminLeadExplorer({ onInventoryLoaded }: { onInventoryLoaded?: (
       <div className={`admin-leads is-${view}${busy ? " is-loading" : ""}`}>
         {view === "table" && (
           <div className="admin-lead-row is-head" aria-hidden="true">
-            <span>{language === "ar" ? "الشخص" : "Person"}</span><span>{language === "ar" ? "الشركة" : "Company"}</span><span>{language === "ar" ? "التواصل" : "Contact"}</span><span>{language === "ar" ? "الإثراء" : "Enrichment"}</span><span>{language === "ar" ? "المصدر" : "Source"}</span><span />
+            <span>{language === "ar" ? "العميل" : "Lead"}</span><span>{language === "ar" ? "الحساب" : "Account"}</span><span>{language === "ar" ? "طلب العميل" : "Prompt"}</span><span>{language === "ar" ? "التواصل" : "Contact"}</span><span>{language === "ar" ? "المصدر" : "Source"}</span><span />
           </div>
         )}
         {response.data.map((lead) => view === "grid"
-          ? <LeadCard key={lead.id} lead={lead} language={language} onOpen={() => setSelected(lead)} />
-          : <LeadRow key={lead.id} lead={lead} language={language} onOpen={() => setSelected(lead)} table={view === "table"} />)}
+          ? <LeadCard key={lead.delivery_id} lead={lead} language={language} onOpen={() => setSelected(lead)} onResearch={onResearch} />
+          : <LeadRow key={lead.delivery_id} lead={lead} language={language} onOpen={() => setSelected(lead)} onResearch={onResearch} table={view === "table"} />)}
       </div>
 
       <footer className="admin-inventory__pagination">
@@ -157,63 +184,70 @@ export function AdminLeadExplorer({ onInventoryLoaded }: { onInventoryLoaded?: (
   );
 }
 
-function LeadCard({ lead, language, onOpen }: { lead: AdminLead; language: "ar" | "en"; onOpen: () => void }) {
+function LeadCard({ lead, language, onOpen, onResearch }: { lead: AdminLead; language: "ar" | "en"; onOpen: () => void; onResearch?: (lead: AdminLead) => void }) {
   return (
-    <article className="admin-lead-card" onClick={onOpen}>
+    <article className="admin-lead-card" id={lead.id} onClick={onOpen}>
       <header>
         <div className="admin-lead-card__identity"><LeadImage lead={lead} /><span className="admin-company-image"><LeadImage lead={lead} company /></span></div>
         <span className={`admin-enrichment is-${lead.enrichment_status}`}><i /> {lead.enrichment_score}%</span>
       </header>
       <div className="admin-lead-card__name"><strong>{lead.name || (language === "ar" ? "سجل شركة" : "Company record")}</strong><span>{lead.title || lead.seniority || (language === "ar" ? "صانع قرار غير محدد" : "Decision maker not identified")}</span></div>
       <div className="admin-lead-card__company"><Building2 size={13} /><span><strong>{lead.company}</strong><small>{lead.industry || (language === "ar" ? "قطاع غير مصنف" : "Unclassified industry")}</small></span></div>
+      <div className="admin-lead-card__assignment">
+        <span><Users size={12} /><strong>{[lead.account_first_name, lead.account_last_name].filter(Boolean).join(" ") || lead.user_email || "—"}</strong><small>{lead.user_email}</small></span>
+        <span><Target size={12} /><strong>{lead.campaign_name || (language === "ar" ? "طلب العميل" : "Lead prompt")}</strong><small>{lead.purpose || "—"}</small></span>
+      </div>
       <div className="admin-lead-card__signals">
         {lead.email && <span><Mail size={12} /> {lead.email}</span>}
         {lead.phone && <span><Phone size={12} /> {lead.phone}</span>}
         {lead.location && <span><MapPin size={12} /> {lead.location}</span>}
       </div>
-      <footer><span><Sparkles size={12} /> {lead.enrichment_status}</span><button onClick={(event) => { event.stopPropagation(); onOpen(); }}>{language === "ar" ? "فتح" : "Open"}{language === "ar" ? <ArrowLeft size={13} /> : <ArrowRight size={13} />}</button></footer>
+      <footer><span className={`lead-type-indicator is-${/b2c/i.test(lead.source) ? "b2c" : "b2b"}`}>{/b2c/i.test(lead.source) ? "B2C" : "B2B"}</span><button disabled={/b2c/i.test(lead.source)} onClick={(event) => { event.stopPropagation(); onResearch?.(lead); }}><Search size={13} />{language === "ar" ? "بحث" : "Research"}</button><button onClick={(event) => { event.stopPropagation(); onOpen(); }}>{language === "ar" ? "فتح" : "Open"}{language === "ar" ? <ArrowLeft size={13} /> : <ArrowRight size={13} />}</button></footer>
     </article>
   );
 }
 
-function LeadRow({ lead, language, onOpen, table }: { lead: AdminLead; language: "ar" | "en"; onOpen: () => void; table: boolean }) {
+function LeadRow({ lead, language, onOpen, onResearch, table }: { lead: AdminLead; language: "ar" | "en"; onOpen: () => void; onResearch?: (lead: AdminLead) => void; table: boolean }) {
   return (
-    <button className={`admin-lead-row${table ? " is-table" : ""}`} onClick={onOpen}>
+    <div className={`admin-lead-row${table ? " is-table" : ""}`} id={lead.id} role="button" tabIndex={0} onClick={onOpen} onKeyDown={(event) => event.key === "Enter" && onOpen()}>
       <span className="admin-lead-row__person"><LeadImage lead={lead} /><span><strong>{lead.name || (language === "ar" ? "سجل شركة" : "Company record")}</strong><small>{lead.title || lead.seniority || "-"}</small></span></span>
-      <span className="admin-lead-row__company"><LeadImage lead={lead} company /><span><strong>{lead.company}</strong><small>{lead.industry || "-"}</small></span></span>
+      <span className="admin-lead-row__account"><strong>{[lead.account_first_name, lead.account_last_name].filter(Boolean).join(" ") || lead.user_email || "-"}</strong><small>{lead.user_email || lead.organization_name || "-"}</small></span>
+      <span className="admin-lead-row__purpose"><strong>{lead.campaign_name || (language === "ar" ? "طلب العميل" : "Lead prompt")}</strong><small>{lead.purpose || "-"}</small></span>
       <span className="admin-lead-row__contact"><strong>{lead.email || lead.phone || "-"}</strong><small>{lead.location || "-"}</small></span>
       <span className={`admin-enrichment is-${lead.enrichment_status}`}><i /> {lead.enrichment_score}%</span>
-      <span className="admin-lead-row__source">{sourceLabel(lead.source, language)}</span>
-      {language === "ar" ? <ArrowLeft size={14} /> : <ArrowRight size={14} />}
-    </button>
+      <span className="admin-lead-row__source"><span className={`lead-type-indicator is-${/b2c/i.test(lead.source) ? "b2c" : "b2b"}`}>{/b2c/i.test(lead.source) ? "B2C" : "B2B"}</span></span>
+      <button className="admin-lead-row__research" disabled={/b2c/i.test(lead.source)} onClick={(event) => { event.stopPropagation(); onResearch?.(lead); }} aria-label={language === "ar" ? "بحث العميل" : "Research lead"}><Search size={14} /></button>
+    </div>
   );
 }
 
 function LeadDetail({ lead, language, onClose }: { lead: AdminLead; language: "ar" | "en"; onClose: () => void }) {
-  return (
+  const isB2C = /b2c/i.test(lead.source);
+  const accountName = [lead.account_first_name, lead.account_last_name].filter(Boolean).join(" ") || lead.user_email || "-";
+  const deliveredAt = lead.delivered_at ? new Date(lead.delivered_at).toLocaleString(language === "ar" ? "ar-SA" : "en-GB", { dateStyle: "medium", timeStyle: "short" }) : "-";
+  return createPortal(
     <div className="admin-lead-detail" role="dialog" aria-modal="true" aria-label={lead.name || lead.company}>
       <button className="admin-lead-detail__backdrop" onClick={onClose} aria-label={language === "ar" ? "إغلاق" : "Close"} />
       <aside>
-        <header><span>{language === "ar" ? "ملف العميل" : "Lead profile"}</span><button onClick={onClose} aria-label={language === "ar" ? "إغلاق" : "Close"}><X size={17} /></button></header>
+        <header><span><small>{language === "ar" ? "سجل تم تسليمه" : "Delivered lead record"}</small><strong>{language === "ar" ? "تفاصيل العميل" : "Lead details"}</strong></span><button onClick={onClose} aria-label={language === "ar" ? "إغلاق" : "Close"}><X size={17} /></button></header>
         <div className="admin-lead-detail__hero">
-          <div><LeadImage lead={lead} /><span className="admin-company-image"><LeadImage lead={lead} company /></span></div>
-          <h2>{lead.name || lead.company}</h2>
-          <p>{lead.title || lead.seniority || (language === "ar" ? "سجل شركة" : "Company record")}</p>
-          <span className={`admin-enrichment is-${lead.enrichment_status}`}><i /> {lead.enrichment_status} · {lead.enrichment_score}%</span>
+          <div className="admin-lead-detail__identity"><div><LeadImage lead={lead} /><span className="admin-company-image"><LeadImage lead={lead} company /></span></div><span><h2>{lead.name || lead.company}</h2><p>{lead.title || lead.seniority || (language === "ar" ? "عميل محتمل" : "Qualified prospect")}</p><small>{lead.company} · {lead.location || (language === "ar" ? "الموقع غير محدد" : "Location unavailable")}</small></span></div>
+          <div className="admin-lead-detail__badges"><span className={`lead-type-indicator is-${isB2C ? "b2c" : "b2b"}`}>{isB2C ? "B2C" : "B2B"}</span><span className={`admin-enrichment is-${lead.enrichment_status}`}><i /> {lead.enrichment_status} · {lead.enrichment_score}%</span></div>
         </div>
-        <section><h3>{language === "ar" ? "الشركة" : "Company"}</h3><div className="admin-detail-company"><LeadImage lead={lead} company /><span><strong>{lead.company}</strong><small>{lead.industry || "-"}</small></span></div></section>
-        <section className="admin-detail-grid">
-          <div><Mail size={13} /><span>{language === "ar" ? "البريد" : "Email"}</span><strong>{lead.email || "-"}</strong></div>
-          <div><Phone size={13} /><span>{language === "ar" ? "الجوال" : "Phone"}</span><strong>{lead.phone || "-"}</strong></div>
-          <div><MapPin size={13} /><span>{language === "ar" ? "الموقع" : "Location"}</span><strong>{lead.location || "-"}</strong></div>
-          <div><Users size={13} /><span>{language === "ar" ? "حجم الشركة" : "Company size"}</span><strong>{lead.company_size || "-"}</strong></div>
-        </section>
-        <section><h3>{language === "ar" ? "ملخص الإثراء" : "Enrichment summary"}</h3><p>{lead.enrichment_summary}</p><div className="admin-detail-signals">{lead.enrichment_signals.map((signal) => <span key={signal}>{signal.replaceAll("_", " ")}</span>)}</div></section>
+        <div className="admin-lead-detail__content">
+          <section className="admin-lead-detail__prompt"><h3><Target size={14} />{language === "ar" ? "طلب العميل الأصلي" : "Original account prompt"}</h3><p>{lead.purpose || "-"}</p></section>
+          <section><h3><Users size={14} />{language === "ar" ? "سياق التسليم" : "Delivery context"}</h3><dl className="admin-detail-list"><div><dt>{language === "ar" ? "الحساب" : "Account"}</dt><dd>{accountName}<small>{lead.user_email}</small></dd></div><div><dt>{language === "ar" ? "الحملة" : "Campaign"}</dt><dd>{lead.campaign_name || "-"}</dd></div><div><dt>{language === "ar" ? "الكمية المطلوبة" : "Requested"}</dt><dd>{lead.requested_leads || "-"}</dd></div><div><dt>{language === "ar" ? "تاريخ التسليم" : "Delivered"}</dt><dd>{deliveredAt}</dd></div></dl></section>
+          <section><h3><Phone size={14} />{language === "ar" ? "بيانات التواصل" : "Contact details"}</h3><div className="admin-detail-contact"><a className={lead.phone ? "" : "is-disabled"} href={lead.phone ? `tel:${lead.phone}` : undefined}><Phone size={16} /><span><small>{language === "ar" ? "الجوال" : "Phone"}</small><strong>{lead.phone || "-"}</strong></span></a><a className={lead.email ? "" : "is-disabled"} href={lead.email ? `mailto:${lead.email}` : undefined}><Mail size={16} /><span><small>{language === "ar" ? "البريد" : "Email"}</small><strong>{lead.email || "-"}</strong></span></a><div><MapPin size={16} /><span><small>{language === "ar" ? "الموقع" : "Location"}</small><strong>{lead.location || "-"}</strong></span></div><div><Building2 size={16} /><span><small>{language === "ar" ? "القطاع" : "Industry"}</small><strong>{lead.industry || "-"}</strong></span></div></div></section>
+          <section><h3><BadgeCheck size={14} />{language === "ar" ? "لماذا تم تأهيله" : "Why this lead qualified"}</h3><p>{lead.enrichment_summary || (language === "ar" ? "لا يوجد ملخص إضافي." : "No additional qualification summary.")}</p><div className="admin-detail-signals">{lead.enrichment_signals.map((signal) => <span key={signal}>{signal.replaceAll("_", " ")}</span>)}</div></section>
+        </div>
         <footer>
+          {lead.source_reference && <a href={lead.source_reference} target="_blank" rel="noreferrer"><ExternalLink size={14} /> {language === "ar" ? "فتح دليل المصدر" : "Open source evidence"}</a>}
           {lead.linkedin_url && <a href={lead.linkedin_url} target="_blank" rel="noreferrer"><Linkedin size={14} /> LinkedIn<ExternalLink size={12} /></a>}
           {lead.website && <a href={lead.website} target="_blank" rel="noreferrer"><Building2 size={14} /> {language === "ar" ? "الموقع" : "Website"}<ExternalLink size={12} /></a>}
+          <span>{sourceLabel(lead.source, language)}</span>
         </footer>
       </aside>
-    </div>
+    </div>,
+    document.getElementById("wasla-modal-root") ?? document.body,
   );
 }

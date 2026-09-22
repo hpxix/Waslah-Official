@@ -10,6 +10,7 @@ export type AuthUser = {
   avatarTone: string;
   verifiedPhone: boolean;
   freeCreditSar: number;
+  includedLeads: number;
   createdAt: string;
   isAdmin: boolean;
 };
@@ -31,6 +32,7 @@ export function accountToAuthUser(account: AccountProfile): AuthUser {
     avatarTone: createAvatarTone(account.avatar_seed || account.name),
     verifiedPhone: account.phone_verified,
     freeCreditSar: account.wallet.balance,
+    includedLeads: account.welcome_offer?.included_leads ?? 30,
     createdAt: account.created_at,
     isAdmin: account.is_admin,
   };

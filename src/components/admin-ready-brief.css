@@ -1,0 +1,46 @@
+.admin-ready-briefs {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 18px;
+  padding: 12px;
+  border: 1px solid #574b26;
+  border-radius: 15px;
+  background: #19170f;
+}
+.admin-ready-briefs > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 3px 9px;
+}
+.admin-ready-briefs > header strong,
+.admin-ready-briefs > header small { display: block; }
+.admin-ready-briefs > header small { color: #9c947c; font-size: 10px; margin-top: 4px; }
+.admin-ready-briefs > header b { color: #f0ce6a; font-size: 18px; }
+.admin-ready-brief { border: 1px solid #3e3824; border-radius: 11px; background: #12110d; overflow: hidden; }
+.admin-ready-brief summary {
+  list-style: none;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 13px;
+  cursor: pointer;
+}
+.admin-ready-brief summary::-webkit-details-marker { display: none; }
+.admin-ready-brief summary strong,
+.admin-ready-brief summary small { display: block; }
+.admin-ready-brief summary small { color: #898475; font-size: 10px; margin-top: 3px; }
+.admin-ready-brief summary p { color: #bbb4a2; font-size: 11px; margin: 7px 0 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.admin-ready-brief summary > b { color: #e6c762; font-size: 9px; letter-spacing: .07em; border: 1px solid #62552d; border-radius: 6px; padding: 5px 7px; }
+.admin-ready-brief > div { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; border-top: 1px solid #302c1e; padding: 12px; }
+.admin-ready-brief section { min-width: 0; border: 1px solid #302c1e; border-radius: 9px; padding: 11px; }
+.admin-ready-brief section small { color: #8e866c; font-size: 9px; }
+.admin-ready-brief section p { color: #d1ccbc; font-size: 11px; line-height: 1.6; white-space: pre-wrap; }
+.admin-ready-brief pre { max-height: 230px; overflow: auto; color: #aaa390; font: 10px/1.5 monospace; white-space: pre-wrap; }
+.admin-ready-brief__note { grid-column: 1 / -1; margin: 0; color: #9c947c; font-size: 10px; line-height: 1.6; }
+@media (max-width: 760px) {
+  .admin-ready-brief summary { grid-template-columns: auto minmax(0, 1fr); }
+  .admin-ready-brief summary > b { grid-column: 2; }
+  .admin-ready-brief > div { grid-template-columns: 1fr; }
+}
