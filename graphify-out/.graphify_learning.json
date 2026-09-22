@@ -1,0 +1,102 @@
+{
+  "generated_at": "2026-09-15T19:28:21.635858+00:00",
+  "nodes": {
+    "src_app_app": {
+      "code_fingerprint": "c4b1b8bb82c94b4028dccd6191773a390984a6f6850e0366ec029c70bdde989e",
+      "label": "App()",
+      "last": "2026-09-15T19:12:53.102823+00:00",
+      "provenance": [
+        {
+          "date": "2026-09-15T19:12:53.102823+00:00",
+          "outcome": "useful",
+          "q": "add logout button fast. no yapping just add it in the front-end"
+        }
+      ],
+      "score": 0.999751724,
+      "source_file": "src/App.tsx",
+      "status": "tentative",
+      "uses": 1
+    },
+    "src_lib_directus": {
+      "code_fingerprint": "006907bfd64feee471b18b72c19b0a72f7ebbd257ee6fd4f5e49dc3e0f450282",
+      "label": "directus.ts",
+      "last": "2026-09-15T19:12:53.102823+00:00",
+      "provenance": [
+        {
+          "date": "2026-09-15T19:12:53.102823+00:00",
+          "outcome": "useful",
+          "q": "add logout button fast. no yapping just add it in the front-end"
+        }
+      ],
+      "score": 0.999751724,
+      "source_file": "src/lib/directus.ts",
+      "status": "tentative",
+      "uses": 1
+    },
+    "src_lib_directus_accountprofile": {
+      "code_fingerprint": "006907bfd64feee471b18b72c19b0a72f7ebbd257ee6fd4f5e49dc3e0f450282",
+      "label": "AccountProfile",
+      "last": "2026-09-14T16:02:50.087050+00:00",
+      "provenance": [
+        {
+          "date": "2026-09-14T16:02:50.087050+00:00",
+          "outcome": "useful",
+          "q": "Continue the dashboard and add admin controls for global/per-account B2B and B2C access, Apify APIs, chat outcomes, B2C sourcing rationale, credit adjustments, and AI-understood account data with instant changes."
+        }
+      ],
+      "score": 0.973942918,
+      "source_file": "src/lib/directus.ts",
+      "status": "tentative",
+      "uses": 1
+    },
+    "src_lib_directus_chatwithwasla": {
+      "code_fingerprint": "006907bfd64feee471b18b72c19b0a72f7ebbd257ee6fd4f5e49dc3e0f450282",
+      "label": "chatWithWasla()",
+      "last": "2026-09-14T16:02:50.087050+00:00",
+      "provenance": [
+        {
+          "date": "2026-09-14T16:02:50.087050+00:00",
+          "outcome": "useful",
+          "q": "Continue the dashboard and add admin controls for global/per-account B2B and B2C access, Apify APIs, chat outcomes, B2C sourcing rationale, credit adjustments, and AI-understood account data with instant changes."
+        }
+      ],
+      "score": 0.973942918,
+      "source_file": "src/lib/directus.ts",
+      "status": "tentative",
+      "uses": 1
+    },
+    "src_lib_directus_fetchapifyleads": {
+      "code_fingerprint": "006907bfd64feee471b18b72c19b0a72f7ebbd257ee6fd4f5e49dc3e0f450282",
+      "label": "fetchApifyLeads()",
+      "last": "2026-09-14T16:02:50.087050+00:00",
+      "provenance": [
+        {
+          "date": "2026-09-14T16:02:50.087050+00:00",
+          "outcome": "useful",
+          "q": "Continue the dashboard and add admin controls for global/per-account B2B and B2C access, Apify APIs, chat outcomes, B2C sourcing rationale, credit adjustments, and AI-understood account data with instant changes."
+        }
+      ],
+      "score": 0.973942918,
+      "source_file": "src/lib/directus.ts",
+      "status": "tentative",
+      "uses": 1
+    },
+    "src_lib_directus_logoutaccount": {
+      "code_fingerprint": "006907bfd64feee471b18b72c19b0a72f7ebbd257ee6fd4f5e49dc3e0f450282",
+      "label": "logoutAccount()",
+      "last": "2026-09-15T19:12:53.102823+00:00",
+      "provenance": [
+        {
+          "date": "2026-09-15T19:12:53.102823+00:00",
+          "outcome": "useful",
+          "q": "add logout button fast. no yapping just add it in the front-end"
+        }
+      ],
+      "score": 0.999751724,
+      "source_file": "src/lib/directus.ts",
+      "status": "tentative",
+      "uses": 1
+    }
+  },
+  "version": 1
+}

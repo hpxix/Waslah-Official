@@ -5,7 +5,6 @@ node_modules/.cache/
 
 # Production builds
 
-dist/
 build/
 .vite/
 
@@ -64,13 +63,5 @@ redis_data/
 *.tsbuildinfo
 coverage/
 
-# Independently versioned / duplicate frontend workspaces
-
-/waslah-frontend/
-/waslah-frontend Green/
-/waslah-frontend Green.zip
-
-# Graphify generated knowledge graph
-
-graphify-out/
-
+# Legacy frontend workspaces, compiled output, the archived Green snapshot,
+# and Graphify output are intentionally retained in the official repository.
