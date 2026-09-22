@@ -3,6 +3,7 @@ import { PassThrough } from "node:stream";
 import { ResearchError, startResearch, observeResearch, publicResearch } from "./relevance.js";
 import {
   createB2CPlan,
+  createB2CDiscoveryTurn,
   selectB2CLeadPaths,
   buildPublicB2CExplanation,
   runB2CCampaign,
@@ -20,6 +21,8 @@ const MAX_LEADS_PER_REQUEST = 200;
 const CHAT_RATE_LIMIT = 30;
 const CHAT_RATE_WINDOW_MS = 60_000;
 const chatRateWindows = new Map();
+let b2cRecoveryTimer = null;
+let b2cRecoverySweepActive = false;
 const DEFAULT_FEATURES = Object.freeze({
   ai_chat: { name: "Wasla AI chat", description: "Thoughtful business discovery and conversation memory.", enabled: true },
   lead_agent_b2b: { name: "B2B lead agent", description: "Company and decision-maker sourcing through managed providers.", enabled: true },
@@ -808,6 +811,8 @@ Conversation principles:
 - Do not interrogate. If the user is vague or unsure, propose a smart default or two and explain the tradeoff briefly.
 - Notice contradictions, weak assumptions, or overly broad targeting. Politely challenge them and suggest a sharper alternative.
 - Adapt depth to the answer: concise users get concise questions; detailed users get thoughtful synthesis.
+- Format for scanning, not as a wall of text. For explanations, plans, comparisons, or summaries, use a short opening sentence followed by 3–6 concise Markdown bullet points. Put the next question on its own final line. For a simple conversational question, use one or two short paragraphs and do not force bullets.
+- Never compress several distinct ideas into one long line. Use whitespace deliberately, keep each bullet to one idea, and avoid tables unless the user explicitly asks for one.
 - Understand Wasla deeply. Relate recommendations to its Business DNA, audience intelligence, qualification, sourcing, enrichment, lead ranking, deep research, content studio, unified conversations, and revenue journey only when relevant—not as a sales pitch in every reply.
 - Do not repeat a generic summary after every answer. Make each response advance the mission.
 
@@ -1023,32 +1028,36 @@ function b2cConversationMessages(prompt, transcript) {
     .map((entry) => String(entry || "").trim())
     .filter((entry) => !/^assistant:\s*/i.test(entry))
     .map((entry) => entry.replace(/^user:\s*/i, "").trim())
-    .filter((entry) => entry && !/^(?:user context:|سياق المستخدم:)/i.test(entry))
+    .filter((entry) => entry && !/^(?:user context:|mission context:|سياق المستخدم:|سياق المهمة:)/i.test(entry))
     .filter((entry) => !/^(?:hello|hi|hey|good (?:morning|evening)|مرحبا|هلا|السلام عليكم|ابدأ|ابدا|start)[.!?؟، ]*$/i.test(entry));
   return [...new Set(messages)];
+}
+
+function wantsWaslaRecommendation(prompt) {
+  return /\b(?:i don'?t know|not sure|you (?:should )?(?:recommend|decide|choose)|recommend (?:for )?me|your (?:recommendation|choice)|suggest|best default|broaden it)\b|ما أدري|لا أدري|مو متأكد|مش متأكد|اقترح|رشح|اختر أنت|انت اختر|وش تنصح|ما أعرف|لا أعرف|وسع البحث|وسّع البحث/i.test(String(prompt || ""));
 }
 
 function qualifyB2CConversation(prompt, transcript, language, dealIntent = "sell") {
   const messages = b2cConversationMessages(prompt, transcript);
   const brief = messages.join(". ").slice(0, 4000);
-  // This is the preflight for a paid Haraj run. Never infer completeness from
-  // message count: every item below becomes a concrete Haraj search input or
+  // This is the preflight for a paid B2C run. Never infer completeness from
+  // message count: every item below becomes a concrete search input or
   // an exclusion, so each must be explicitly established with the user.
   const hasOffer = messages.some((entry) => entry.split(/\s+/).filter(Boolean).length >= 3);
   const hasAudience = dealIntent === "buy"
     ? /\b(?:owners?|sellers?|individuals?|people|private|used|new|condition|dealer)\b|مالك|ملاك|بائع|أفراد|افراد|مستعمل|جديد|حالة/i.test(brief)
     : /\b(?:owners?|consumers?|customers?|buyers?|parents?|students?|drivers?|gamers?|families|men|women|people|residents?|travelers?|renters?|homeowners?)\b|ملاك|مالكي|مستهلك|عملاء|مشتر|آباء|امهات|طلاب|سائق|عائلات|نساء|رجال|أفراد|افراد/i.test(brief);
-  const hasLocation = /\b(?:saudi arabia|saudi|riyadh|jeddah|dammam|khobar|makkah|mecca|madinah|medina|tabuk|abha|gcc|gulf)\b|السعودية|السعوديه|الرياض|جدة|جده|الدمام|الخبر|مكة|مكه|المدينة|المدينه|تبوك|أبها|ابها|الخليج/i.test(brief);
+  const hasLocation = /\b(?:saudi arabia|saudi|riyadh|jeddah|damm?am|khobar|makkah|mecca|madinah|medina|tabuk|abha|gcc|gulf)\b|السعودية|السعوديه|الرياض|جدة|جده|الدمام|الخبر|مكة|مكه|المدينة|المدينه|تبوك|أبها|ابها|الخليج/i.test(brief);
   const hasSignal = dealIntent === "buy"
     ? /\b(?:budget|under\s+(?:sar|riyal)|maximum|max\.?|model year|mileage|kilomet(?:er|re)s?|trim|condition|automatic|manual|warranty|deadline|urgent)\b|ميزانية|ريال|حد أقصى|موديل|سنة الصنع|ممشى|كيلو|فئة|حالة|أوتوماتيك|عادي|ضمان|موعد|عاجل/i.test(brief)
-    : /\b(?:owns?|interested|recently|category|keyword|pain point|trigger|behavior|behaviour|looking for|moving|renovating|engaged|newlywed)\b|يمتلك|مهتم|مؤخراً|تصنيف|فئة|كلمة|مشكلة|سلوك|إشارة|يبحث|ينتقل|انتقال|تشطيب|تجديد|زواج|عرس/i.test(brief);
+    : /\b(?:owns?|interested|recently|category|keyword|pain point|trigger|behavior|behaviour|looking for|moving|renovating|engaged|newlywed|newly married|birthday|anniversary|wedding planning|party supplies|venue)\b|يمتلك|مهتم|مؤخراً|تصنيف|فئة|كلمة|مشكلة|سلوك|إشارة|يبحث|ينتقل|انتقال|تشطيب|تجديد|زواج|عرس|ذكرى زواج|عيد ميلاد|قاعة|استراحة/i.test(brief);
   const hasExclusions = /\b(?:exclude|excluding|without|not\s+(?:sellers?|companies?|dealers?|resellers?))\b|استبعد|باستثناء|بدون|لا أريد|لا نريد|ليس/i.test(brief);
   const missing = [];
   if (!hasOffer) missing.push(language === "ar" ? "المنتج أو الخدمة والقيمة التي تقدمها" : "the product or service and its main value");
   if (hasOffer && !hasAudience) missing.push(language === "ar" ? "وصف العميل المثالي" : "the ideal customer profile");
   if (hasOffer && hasAudience && !hasLocation) missing.push(language === "ar" ? "المدينة أو المنطقة المستهدفة" : "the target city or region");
   if (hasOffer && hasAudience && hasLocation && !hasSignal) missing.push(language === "ar" ? "إشارة الشراء أو الفئة والكلمات المستهدفة" : "the buying signal, category, or target keywords");
-  if (hasOffer && hasAudience && hasLocation && hasSignal && !hasExclusions) missing.push(language === "ar" ? "ما يجب استبعاده من نتائج حراج" : "what Haraj results to exclude");
+  if (hasOffer && hasAudience && hasLocation && hasSignal && !hasExclusions) missing.push(language === "ar" ? "ما يجب استبعاده من النتائج" : "what results to exclude");
   if (!missing.length) return { ready: true, missing, brief };
   const question = !hasOffer
     ? dealIntent === "buy"
@@ -1064,7 +1073,7 @@ function qualifyB2CConversation(prompt, transcript, language, dealIntent = "sell
           ? dealIntent === "buy"
             ? (language === "ar" ? "ما الميزانية والحالة أو الكلمات التي تدل على عرض مناسب؟" : "What budget, condition, or listing keywords signal a good offer?")
             : (language === "ar" ? "ما السلوك أو الفئة أو الكلمات التي تدل على أن الشخص مشترٍ قوي؟" : "What behavior, category, or keywords would signal a strong buyer?")
-          : (language === "ar" ? "قبل أن أبني بحث حراج: ما الذي تريد استبعاده بوضوح—مثلاً التجار، الإعلانات القديمة، مدينة معيّنة، أو حالة غير مناسبة؟" : "Before I build the Haraj search: what should I explicitly exclude—for example dealers, old listings, a city, or an unsuitable condition?");
+          : (language === "ar" ? "قبل أن أبني البحث: ما الذي تريد استبعاده بوضوح—مثلاً التجار، النتائج القديمة، مدينة معيّنة، أو حالة غير مناسبة؟" : "Before I build the search: what should I explicitly exclude—for example dealers, old listings, a city, or an unsuitable condition?");
   return { ready: false, missing, brief, question };
 }
 
@@ -1080,6 +1089,7 @@ function maskPhone(phone) {
 }
 
 function publicLead(row, revealed) {
+  const publicSource = ["b2c", "haraj"].includes(String(row.source || "").toLowerCase()) ? "b2c" : row.source;
   return {
     id: row.id,
     name: revealed ? row.name : row.name ? `${row.name.slice(0, 1)}***` : null,
@@ -1094,7 +1104,7 @@ function publicLead(row, revealed) {
     company_size: row.company_size,
     location: row.location,
     industry: row.industry,
-    source: row.source,
+    source: publicSource,
     fit_score: row.fit_score,
     qualification_status: row.qualification_status,
     enrichment_status: row.enrichment_status,
@@ -1206,6 +1216,8 @@ async function rememberConversation(database, context, values) {
     summary: String(values.summary || "").slice(0, 6000), missing: values.missing || [],
     search_queries: values.searchQueries || [], b2c_intent: values.b2cIntent || null,
     acquisition_plan: values.acquisitionPlan || null, outcome: values.outcome || "discovery",
+    known_facts: Array.isArray(values.knownFacts) ? values.knownFacts.slice(0, 30) : [],
+    answered_topics: Array.isArray(values.answeredTopics) ? values.answeredTopics.slice(0, 20) : [],
   };
   const observations = [...(Array.isArray(previous.observations) ? previous.observations : []), observation].slice(-40);
   const understood = { ...previous, observations, latest: observation };
@@ -1219,6 +1231,50 @@ async function rememberConversation(database, context, values) {
   };
   if (existing) await database("ai_account_memory").where({ id: existing.id }).update(row);
   else await database("ai_account_memory").insert({ id: randomUUID(), memory_key: key, ...row, created_at: isoNow() });
+}
+
+function normalizedTranscriptLine(value) {
+  return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+async function b2cConversationContext(database, context, conversationId, clientTranscript = []) {
+  const [memoryRow, recentRows] = await Promise.all([
+    database("ai_account_memory").where({ user_id: context.userId }).first(),
+    conversationId
+      ? database("chat_logs")
+        .select("message", "response", "created_at")
+        .where({ user_id: context.userId, conversation_id: conversationId })
+        .orderBy("created_at", "desc")
+        .limit(60)
+      : Promise.resolve([]),
+  ]);
+  const serverTranscript = [...recentRows].reverse().flatMap((row) => [
+    row.message ? `user: ${row.message}` : null,
+    row.response ? `assistant: ${row.response}` : null,
+  ]).filter(Boolean);
+  const merged = [];
+  const seen = new Set();
+  for (const line of [...serverTranscript, ...(Array.isArray(clientTranscript) ? clientTranscript : [])]) {
+    const text = String(line || "").trim();
+    const key = normalizedTranscriptLine(text);
+    if (!text || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(text);
+  }
+  const stored = parseStoredJson(memoryRow?.understood_data, { observations: [] });
+  const observations = (Array.isArray(stored.observations) ? stored.observations : []);
+  const sameConversation = conversationId
+    ? observations.filter((item) => item?.conversation_id === conversationId)
+    : [];
+  const relevant = (sameConversation.length ? sameConversation : observations.slice(-4)).slice(-20);
+  const memoryContext = {
+    cumulative_summaries: relevant.map((item) => item.summary).filter(Boolean),
+    known_facts: [...new Set(relevant.flatMap((item) => Array.isArray(item.known_facts) ? item.known_facts : []))].slice(-40),
+    answered_topics: [...new Set(relevant.flatMap((item) => Array.isArray(item.answered_topics) ? item.answered_topics : []))].slice(-30),
+    remaining_questions: relevant.at(-1)?.missing || [],
+    last_outcome: relevant.at(-1)?.outcome || null,
+  };
+  return { transcript: merged.slice(-100), memoryContext };
 }
 
 async function chatContext(database, req) {
@@ -1470,6 +1526,46 @@ export default {
   handler: (router, { services, database, getSchema, env, logger }) => {
     const { FilesService, ItemsService, UsersService } = services;
 
+    // B2C work used to continue only through an in-memory setTimeout chain.
+    // A Directus restart therefore left campaigns marked RUNNING forever even
+    // though no worker remained. Recover stale jobs from their persisted page
+    // cursors so restarts and transient process failures are self-healing.
+    const recoverStaleB2CCampaigns = async () => {
+      if (b2cRecoverySweepActive) return;
+      b2cRecoverySweepActive = true;
+      try {
+        const staleBefore = new Date(Date.now() - 90_000).toISOString();
+        const staleCampaigns = await database("b2c_campaigns")
+          .select("id", "status", "updated_at")
+          .whereIn("status", ["RUNNING", "QUEUED"])
+          .andWhere("updated_at", "<", staleBefore)
+          .orderBy("updated_at", "asc")
+          .limit(10);
+        for (const campaign of staleCampaigns) {
+          const claimed = await database("b2c_campaigns")
+            .where({ id: campaign.id, status: campaign.status })
+            .andWhere("updated_at", "<", staleBefore)
+            .update({ status: "QUEUED", updated_at: isoNow() });
+          if (!claimed) continue;
+          logger.warn(`Recovering stale B2C campaign ${campaign.id} from its persisted cursor.`);
+          runB2CCampaign({ database, env, campaignId: campaign.id, logger }).catch((error) => {
+            logger.error(`Recovered B2C campaign ${campaign.id} failed: ${error.message}`);
+          });
+        }
+      } catch (error) {
+        // Bootstrap can briefly run before extension tables are available.
+        logger.warn(`B2C recovery sweep skipped: ${error.message}`);
+      } finally {
+        b2cRecoverySweepActive = false;
+      }
+    };
+    if (!b2cRecoveryTimer) {
+      const initialRecovery = setTimeout(recoverStaleB2CCampaigns, 2_500);
+      initialRecovery.unref?.();
+      b2cRecoveryTimer = setInterval(recoverStaleB2CCampaigns, 30_000);
+      b2cRecoveryTimer.unref?.();
+    }
+
     router.get("/health", route(async (_req, res) => {
       res.json({
         data: {
@@ -1571,14 +1667,16 @@ export default {
       enforceChatRateLimit(context.userId);
       const prompt = String(req.body?.message || req.body?.prompt || "").trim();
       const language = req.body?.language === "en" ? "en" : "ar";
-      const transcript = Array.isArray(req.body?.transcript) ? req.body.transcript : [];
+      const clientTranscript = Array.isArray(req.body?.transcript) ? req.body.transcript : [];
       const conversationId = req.body?.conversation_id || req.body?.conversationId;
       const dealIntent = req.body?.deal_intent === "buy" ? "buy" : "sell";
       const suppliedPlanning = req.body?.planning;
       if (prompt.length < 3) throw new ApiError(400, "B2C_PROMPT_REQUIRED", "Describe the product or service you want to sell.");
       if (prompt.length > 4000) throw new ApiError(400, "B2C_PROMPT_TOO_LONG", "Keep the request under 4,000 characters.");
-      const qualification = qualifyB2CConversation(prompt, transcript, language, dealIntent);
-      const businessContext = await waslaBusinessContext(database, context.organization);
+      const baseBusinessContext = await waslaBusinessContext(database, context.organization);
+      const conversationState = await b2cConversationContext(database, context, conversationId, clientTranscript);
+      const transcript = conversationState.transcript;
+      const businessContext = `${baseBusinessContext}\nConversation memory (use as facts; do not repeat answered questions): ${JSON.stringify(conversationState.memoryContext)}`;
       if (dealIntent === "sell" && suppliedPlanning?.acquisitionPlan?.leadPaths?.length && /^SELECT_PATHS?:/i.test(prompt)) {
         const planning = selectB2CLeadPaths(suppliedPlanning, prompt);
         const selectedNames = planning.acquisitionPlan.leadPaths.filter((path) => path.selected).map((path) => path.name);
@@ -1590,28 +1688,19 @@ export default {
         res.json({ data: { text, planning, ready: true, missing: [], brief: planning.intent.productDescription, stage: "ready_for_quantity" } });
         return;
       }
-      if (!qualification.ready) {
-        // Qualification questions must be deterministic. A general model reply
-        // can sound helpful while skipping the missing targeting criterion.
-        const nextQuestion = qualification.question;
-        await createChatLog(database, context, { conversationId, mode: "b2c", language, leadType: "b2c", dealIntent, message: prompt, response: nextQuestion, transcript, understoodData: { brief: qualification.brief, missing: qualification.missing }, outcome: "discovery", status: "qualifying" }).catch((error) => logger.error(error));
-        await rememberConversation(database, context, { conversationId, leadType: "b2c", dealIntent, message: prompt, summary: qualification.brief, missing: qualification.missing, confidence: 35, outcome: "discovery" }).catch((error) => logger.error(error));
-        res.json({ data: { text: nextQuestion, planning: null, ready: false, missing: qualification.missing, brief: qualification.brief } });
+      const discovery = await createB2CDiscoveryTurn(env, { message: prompt, transcript, language, dealIntent, businessContext });
+      if (!discovery.ready) {
+        await createChatLog(database, context, { conversationId, mode: "b2c", language, leadType: "b2c", dealIntent, message: prompt, response: discovery.reply, transcript, understoodData: discovery, outcome: "discovery", status: "qualifying" }).catch((error) => logger.error(error));
+        await rememberConversation(database, context, { conversationId, leadType: "b2c", dealIntent, message: prompt, summary: discovery.summary, missing: discovery.missing, knownFacts: discovery.knownFacts, answeredTopics: discovery.answeredTopics, confidence: discovery.confidence, outcome: "discovery" }).catch((error) => logger.error(error));
+        res.json({ data: { text: discovery.reply, planning: null, ready: false, missing: discovery.missing, brief: discovery.summary, recommendedTagIds: discovery.recommendedTagIds } });
         return;
       }
-      const planningPrompt = dealIntent === "buy" ? `[PROCUREMENT_FROM_CONSUMERS] ${qualification.brief}` : qualification.brief;
-      const planning = await createB2CPlan(env, planningPrompt);
+      const planningPrompt = dealIntent === "buy" ? `[PROCUREMENT_FROM_CONSUMERS] ${discovery.summary}` : discovery.summary;
+      let planning = await createB2CPlan(env, planningPrompt, { preferredTagIds: discovery.confirmedTagIds.length ? discovery.confirmedTagIds : discovery.recommendedTagIds });
+      if (dealIntent === "sell" && planning.acquisitionPlan.pathSelectionRequired) {
+        planning = selectB2CLeadPaths(planning, planning.acquisitionPlan.leadPaths.map((path) => path.id));
+      }
       const { intent, acquisitionPlan } = planning;
-      if (dealIntent === "sell" && acquisitionPlan.pathSelectionRequired) {
-        const pathNames = acquisitionPlan.leadPaths.map((path, index) => `${index + 1}. ${path.name}`).join(language === "ar" ? "\n" : "\n");
-        const text = language === "ar"
-          ? `فهمت عرضك: ${intent.productName}. بدلاً من البحث عن منافسين يبيعون نفس خدمتك، بنيت مسارات نحو من تظهر لديهم حاجة فعلية:\n\n${pathNames}\n\nاختر مساراً واحداً أو أكثر أدناه، وسأستخدمه فقط بعد موافقتك.`
-          : `I understand your offer: ${intent.productName}. Instead of finding competitors selling the same service, I built paths toward people showing a real need:\n\n${pathNames}\n\nChoose one or more paths below. I will only use the paths you approve.`;
-        await createChatLog(database, context, { conversationId, mode: "b2c", language, leadType: "b2c", dealIntent, message: prompt, response: text, transcript, understoodData: planning, outcome: "lead_path_selection", status: "qualifying" }).catch((error) => logger.error(error));
-        await rememberConversation(database, context, { conversationId, leadType: "b2c", dealIntent, message: prompt, summary: qualification.brief, missing: ["lead_path_selection"], b2cIntent: planning.intent, acquisitionPlan: planning.acquisitionPlan, confidence: 75, outcome: "lead_path_selection" }).catch((error) => logger.error(error));
-        res.json({ data: { text, planning, ready: false, missing: ["lead_path_selection"], brief: qualification.brief, stage: "lead_path_selection" } });
-        return;
-      }
       const strength = acquisitionPlan.strategies.length >= 4 ? (language === "ar" ? "قوية" : "strong") : (language === "ar" ? "مبدئية" : "focused");
       const profiles = acquisitionPlan.targetProfiles.slice(0, 3).join(language === "ar" ? "، " : ", ");
       const signals = intent.behavioralSignals.slice(0, 3).map((item) => item.signal).join(language === "ar" ? "، " : ", ");
@@ -1628,8 +1717,8 @@ export default {
         : `Internal context for the next reply: the brief is complete. Product or request: ${intent.productName}. Target profiles: ${profiles}. Signals: ${signals}. Geography: ${locations}. Synthesize your understanding thoughtfully and naturally, state any important assumption, then ask the user to reply “start” only if the description is accurate.`;
       const text = await createWaslaChatResponse(env, prompt, [...transcript, `user: ${synthesisContext}`], language, "b2c", dealIntent, businessContext).catch(() => fallbackText);
       await createChatLog(database, context, { conversationId, mode: "b2c", language, leadType: "b2c", dealIntent, message: prompt, response: text, transcript, understoodData: planning, outcome: "ready_for_quantity", status: "completed" }).catch((error) => logger.error(error));
-      await rememberConversation(database, context, { conversationId, leadType: "b2c", dealIntent, message: prompt, summary: qualification.brief, missing: [], b2cIntent: planning.intent, acquisitionPlan: planning.acquisitionPlan, confidence: 100, outcome: "ready_for_quantity" }).catch((error) => logger.error(error));
-      res.json({ data: { text, planning, ready: true, missing: [], brief: qualification.brief } });
+      await rememberConversation(database, context, { conversationId, leadType: "b2c", dealIntent, message: prompt, summary: discovery.summary, missing: [], knownFacts: discovery.knownFacts, answeredTopics: discovery.answeredTopics, b2cIntent: planning.intent, acquisitionPlan: planning.acquisitionPlan, confidence: 100, outcome: "ready_for_quantity" }).catch((error) => logger.error(error));
+      res.json({ data: { text, planning, ready: true, missing: [], brief: discovery.summary } });
     }, logger));
 
     router.post("/b2c/plan", route(async (req, res) => {
@@ -1656,10 +1745,6 @@ export default {
       }
       const { userId, organization } = context;
       const suppliedPlanning = req.body?.planning;
-      const qualification = qualifyB2CConversation(prompt, [], "en", suppliedPlanning?.acquisitionPlan?.dealIntent || "sell");
-      if (!qualification.ready) {
-        throw new ApiError(409, "B2C_BRIEF_INCOMPLETE", `Complete the lead brief before starting a campaign: ${qualification.missing.join(", ")}.`);
-      }
       const planning = await validateB2CPlan(env, prompt, suppliedPlanning);
       const now = isoNow();
       const campaignId = randomUUID();
@@ -2984,7 +3069,11 @@ export default {
       const requestIds = rows.filter((row) => ["b2c", "haraj"].includes(row.provider)).map((row) => row.id);
       const campaigns = requestIds.length ? await database("b2c_campaigns").whereIn("request_id", requestIds) : [];
       const campaignByRequest = new Map(campaigns.map((campaign) => [campaign.request_id, serializeCampaign(campaign)]));
-      res.json({ data: rows.map((row) => ({ ...row, b2cCampaign: campaignByRequest.get(row.id) || null })) });
+      res.json({ data: rows.map((row) => ({
+        ...row,
+        provider: ["b2c", "haraj"].includes(String(row.provider || "").toLowerCase()) ? "b2c" : row.provider,
+        b2cCampaign: campaignByRequest.get(row.id) || null,
+      })) });
     }, logger));
 
     router.get("/lead-runs", route(async (req, res) => {
@@ -3034,7 +3123,11 @@ export default {
         .where({ id: req.params.id, organization_id: organization.id, created_by: userId }).first();
       if (!row) throw new ApiError(404, "REQUEST_NOT_FOUND", "Lead request not found.");
       const campaign = ["b2c", "haraj"].includes(row.provider) ? await database("b2c_campaigns").where({ request_id: row.id }).first() : null;
-      res.json({ data: { ...row, b2cCampaign: campaign ? serializeCampaign(campaign) : null } });
+      res.json({ data: {
+        ...row,
+        provider: ["b2c", "haraj"].includes(String(row.provider || "").toLowerCase()) ? "b2c" : row.provider,
+        b2cCampaign: campaign ? serializeCampaign(campaign) : null,
+      } });
     }, logger));
 
     router.get("/requests/:id/results", route(async (req, res) => {
@@ -3157,6 +3250,11 @@ export default {
       const enrichment = String(req.query.enrichment || "all").slice(0, 40);
       const qualification = String(req.query.qualification || "all").slice(0, 40);
       const source = String(req.query.source || "all").slice(0, 80);
+      const account = String(req.query.account || "all").trim().slice(0, 255);
+      const requestId = String(req.query.request || "all").trim().slice(0, 80);
+      if (requestId !== "all" && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+        throw new ApiError(400, "INVALID_REQUEST_FILTER", "Choose a valid lead query.");
+      }
       const sortKey = String(req.query.sort || "enrichment_score");
       const sortColumns = {
         enrichment_score: "enrichment_score",
@@ -3166,41 +3264,75 @@ export default {
       };
       const sortColumn = sortColumns[sortKey] || sortColumns.enrichment_score;
 
-      const applyFilters = (query) => {
-        if (search) {
-          const pattern = `%${search.replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
-          query.where((builder) => builder
-            .whereRaw("name ILIKE ?", [pattern])
-            .orWhereRaw("company ILIKE ?", [pattern])
-            .orWhereRaw("title ILIKE ?", [pattern])
-            .orWhereRaw("email ILIKE ?", [pattern])
-            .orWhereRaw("phone ILIKE ?", [pattern])
-            .orWhereRaw("industry ILIKE ?", [pattern])
-            .orWhereRaw("location ILIKE ?", [pattern]));
+      const baseQuery = () => database("lead_request_results as result")
+        .join("lead_inventory as lead", "lead.id", "result.lead_id")
+        .join("lead_requests as request", "request.id", "result.request_id")
+        .leftJoin("organizations as organization", "organization.id", "result.organization_id")
+        .leftJoin("directus_users as account_user", "account_user.id", "result.user_id")
+        .leftJoin("b2c_campaigns as campaign", "campaign.request_id", "result.request_id");
+
+      const applyAccountFilter = (query) => {
+        if (account !== "all" && account) {
+          const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(account);
+          query.where((builder) => {
+            builder.whereRaw("LOWER(result.user_email) = ?", [account.toLowerCase()]);
+            if (isUuid) builder.orWhere("result.user_id", account).orWhere("result.organization_id", account);
+          });
         }
-        if (enrichment !== "all") query.where("enrichment_status", enrichment);
-        if (qualification !== "all") query.where("qualification_status", qualification);
-        if (source !== "all") query.where("source", source);
         return query;
       };
 
-      const countRow = await applyFilters(database("lead_inventory")).count("id as count").first();
-      const rows = await applyFilters(database("lead_inventory"))
+      const applyFilters = (query) => {
+        applyAccountFilter(query);
+        if (requestId !== "all" && requestId) query.where("result.request_id", requestId);
+        if (search) {
+          const pattern = `%${search.replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
+          query.where((builder) => builder
+            .whereRaw("lead.name ILIKE ?", [pattern])
+            .orWhereRaw("lead.company ILIKE ?", [pattern])
+            .orWhereRaw("lead.title ILIKE ?", [pattern])
+            .orWhereRaw("lead.email ILIKE ?", [pattern])
+            .orWhereRaw("lead.phone ILIKE ?", [pattern])
+            .orWhereRaw("lead.industry ILIKE ?", [pattern])
+            .orWhereRaw("lead.location ILIKE ?", [pattern])
+            .orWhereRaw("result.user_email ILIKE ?", [pattern])
+            .orWhereRaw("organization.name ILIKE ?", [pattern])
+            .orWhereRaw("request.query ILIKE ?", [pattern])
+            .orWhereRaw("campaign.name ILIKE ?", [pattern]));
+        }
+        if (enrichment !== "all") query.where("lead.enrichment_status", enrichment);
+        if (qualification !== "all") query.where("lead.qualification_status", qualification);
+        if (source !== "all") query.where("lead.source", source);
+        return query;
+      };
+
+      const countRow = await applyFilters(baseQuery()).count("result.id as count").first();
+      const rows = await applyFilters(baseQuery())
         .select(
-          "id", "name", "title", "company", "email", "phone", "person_image_url", "company_image_url",
-          "website", "linkedin_url", "company_linkedin_url", "location", "industry", "seniority", "company_size",
-          "annual_revenue", "review_score", "review_count", "source", "source_reference", "fit_score",
-          "qualification_status", "enrichment_status", "enrichment_score", "enrichment_summary", "enrichment_signals",
-          "last_enriched_at", "created_at", "updated_at",
+          "lead.id", "lead.name", "lead.title", "lead.company", "lead.email", "lead.phone", "lead.person_image_url", "lead.company_image_url",
+          "lead.website", "lead.linkedin_url", "lead.company_linkedin_url", "lead.location", "lead.industry", "lead.seniority", "lead.company_size",
+          "lead.annual_revenue", "lead.review_score", "lead.review_count", "lead.source", "lead.source_reference", "lead.fit_score",
+          "lead.qualification_status", "lead.enrichment_status", "lead.enrichment_score", "lead.enrichment_summary", "lead.enrichment_signals",
+          "lead.last_enriched_at", "lead.created_at", "lead.updated_at",
+          "result.id as delivery_id", "result.request_id", "result.user_id", "result.user_email", "result.organization_id",
+          "organization.name as organization_name", "account_user.first_name as account_first_name", "account_user.last_name as account_last_name",
+          "request.query as purpose", "request.target_count as requested_leads", "request.provider", "campaign.id as campaign_id", "campaign.name as campaign_name",
+          "result.created_at as delivered_at",
         )
-        .orderBy(sortColumn, sortColumn === "company" ? "asc" : "desc")
-        .orderBy("company", "asc")
+        .orderBy(`lead.${sortColumn}`, sortColumn === "company" ? "asc" : "desc")
+        .orderBy("lead.company", "asc")
         .limit(limit)
         .offset((page - 1) * limit);
 
-      const [enrichmentRows, sourceRows] = await Promise.all([
-        database("lead_inventory").select("enrichment_status").count("id as count").groupBy("enrichment_status"),
-        database("lead_inventory").select("source").count("id as count").groupBy("source").orderBy("count", "desc"),
+      const [enrichmentRows, sourceRows, queryRows] = await Promise.all([
+        applyFilters(baseQuery()).select("lead.enrichment_status").count("result.id as count").groupBy("lead.enrichment_status"),
+        applyFilters(baseQuery()).select("lead.source").count("result.id as count").groupBy("lead.source").orderBy("count", "desc"),
+        applyAccountFilter(baseQuery())
+          .select("request.id", "request.query", "request.target_count", "campaign.name as campaign_name")
+          .count("result.id as delivered_count")
+          .max("result.created_at as last_delivery_at")
+          .groupBy("request.id", "request.query", "request.target_count", "campaign.name")
+          .orderBy("last_delivery_at", "desc"),
       ]);
       const total = Number(countRow?.count || 0);
       res.json({
@@ -3212,6 +3344,14 @@ export default {
           pages: Math.max(1, Math.ceil(total / limit)),
           enrichment: Object.fromEntries(enrichmentRows.map((row) => [row.enrichment_status || "unknown", Number(row.count)])),
           sources: sourceRows.map((row) => ({ value: row.source, count: Number(row.count) })),
+          queries: queryRows.map((row) => ({
+            id: row.id,
+            prompt: row.query,
+            campaign_name: row.campaign_name,
+            requested_count: Number(row.target_count || 0),
+            delivered_count: Number(row.delivered_count || 0),
+            last_delivery_at: row.last_delivery_at,
+          })),
         },
       });
     }, logger));
@@ -3523,16 +3663,31 @@ export default {
             api_queries: (acquisitionPlan.strategies || []).map((strategy) => ({
               tag: strategy.tagName, cities: strategy.cities || [], strategy_type: strategy.strategyType,
               weight: strategy.weight, pages: pageLimit, results_per_page: resultLimit,
+              mode: strategy.sourceMode || "category", phase: strategy.phase || "primary",
+              progress: stats.strategyProgress?.[String(strategy.pathId || strategy.tagId || strategy.tagName)] || null,
             })),
             qualification_thresholds: acquisitionPlan.qualification || {},
+            execution_rules: stats.executionRules || [],
+            execution_ledger: stats.executionLedger || [],
+            exact_count_contract: stats.exactCountContract || { requested: Number(row.target_lead_count || 0), delivered: Number(stats.uniqueLeads || 0), remaining: Math.max(0, Number(row.target_lead_count || 0) - Number(stats.uniqueLeads || 0)) },
+            recovery: {
+              enabled: true,
+              round: Number(stats.recoveryRound || acquisitionPlan.recovery?.round || 0),
+              maximum_rounds: safeInteger(env.B2C_MAX_RECOVERY_ROUNDS, 6, 0, 20),
+              fallback_activated: Boolean(stats.searchFallbackActivated),
+              source_exhausted: Boolean(stats.sourceExhausted),
+              contact_authentication: stats.contactAuthentication || "not_rejected",
+            },
             stages: [
               "Translate the offer into buyer/owner intent and exclusion signals",
-              "Map signals to validated Saudi marketplace taxonomy tags",
-              "Fetch recent public listings by tag and city",
+              "Map signals to validated Saudi marketplace taxonomy tags and downstream buyer paths",
+              "Fetch fresh pages for every approved path and persist its cursor",
               "Classify marketplace role and score identity, purchase propensity, evidence, recency, activity and geography",
               "Reject sellers, resellers, competitors and weak matches for sell campaigns",
-              "Resolve contact details only for qualified candidates",
-              "Deduplicate by phone or account identity and save the lead to the requesting workspace",
+              "Deduplicate before contact resolution and reject anyone previously delivered to the workspace",
+              "Resolve contact details only for qualified candidates using the authenticated connection",
+              "Expand into new AI-generated buyer-side paths when the current paths are exhausted",
+              "Complete only when the exact requested quantity has been delivered",
             ],
             stats,
             sourcing_explanation: parseStoredJson(row.sourcing_explanation, row.sourcing_explanation || null),

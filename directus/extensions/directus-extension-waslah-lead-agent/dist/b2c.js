@@ -57,6 +57,20 @@ const POSTS_QUERY = `query FetchAds(
   }
 }`;
 
+const SEARCH_QUERY = `query Search($search: String!, $cities: [String], $page: Int, $limit: Int) {
+  search(search: $search, cities: $cities, page: $page, limit: $limit) {
+    items {
+      id title postDate updateDate authorUsername authorId URL bodyTEXT bodyHTML thumbURL
+      hasImage hasVideo city geoCity geoNeighborhood geoHash tags imagesList commentEnabled
+      commentStatus isPromoted commentCount upRank downRank status postType tagsFilters
+      generalInfo { key value }
+      price { formattedPrice inputPrice }
+    }
+    pageInfo { hasNextPage }
+    viewOptions { hasSellersList }
+  }
+}`;
+
 const CONTACT_QUERY = `query PostContactQuery($postId: Int!, $isManualRequest: Boolean) {
   postContact(postId: $postId, isManualRequest: $isManualRequest) {
     contactText contactMobile shouldEnableWhatsApp
@@ -70,6 +84,16 @@ const ROLE_VALUES = [
 const STRATEGY_VALUES = [
   "DIRECT_INTENT", "ADJACENT_INTENT", "BEHAVIORAL_PROXY", "DEVICE_PROXY", "OWNERSHIP_PROXY",
 ];
+
+const DEMAND_MARKER = /\b(?:wanted|need|needed|looking for|seeking|recommend|recommendation)\b|مطلوب|ابي|أبي|ابغى|أبغى|احتاج|أحتاج|نحتاج|ابحث عن|أبحث عن|من يوفر|من يجهز|دلوني|اقتراح|ترشيح/i;
+const SUPPLY_MARKER = /\b(?:for sale|available|we provide|we offer|shop|store|supplier|rent(?:al)?)\b|للبيع|متوفر|نوفر|نقدم|خدماتنا|محل|متجر|مؤسسة|شركة|تأجير|للايجار|للإيجار|للتواصل/i;
+const SIGNAL_STOP_WORDS = new Set([
+  "مطلوب", "ابي", "ابغى", "احتاج", "نحتاج", "ابحث", "أبحث", "من", "عن", "في", "الى", "الي", "على", "مع",
+  "wanted", "need", "needed", "looking", "seeking", "recommend", "recommendation", "for", "the", "and", "with",
+  "السعوديه", "السعودية", "الرياض", "جده", "جدة", "الدمام", "الخبر", "مكه", "مكة", "المدينه", "المدينة", "تبوك", "ابها", "أبها", "الشرقيه", "الشرقية",
+  "saudi", "arabia", "riyadh", "jeddah", "dammam", "khobar", "makkah", "mecca", "madinah", "medina", "tabuk", "abha",
+  "خدمه", "خدمة", "خدمات", "حفله", "حفلة", "حفلات", "مناسبه", "مناسبة", "مناسبات", "زواج", "service", "services", "event", "events",
+]);
 
 const RECIPE_HINTS = [
   {
@@ -378,6 +402,143 @@ export async function createLeadIntent(env, prompt) {
   }
 }
 
+const searchPhraseSchema = {
+  type: "object", additionalProperties: false, required: ["queries"],
+  properties: {
+    queries: {
+      type: "array", minItems: 1, maxItems: 1,
+      items: {
+        type: "object", additionalProperties: false,
+        required: ["term", "reason", "requiredSignals", "excludedSignals", "acceptSellerSignals"],
+        properties: {
+          term: { type: "string" }, reason: { type: "string" },
+          requiredSignals: { type: "array", items: { type: "string" }, maxItems: 8 },
+          excludedSignals: { type: "array", items: { type: "string" }, maxItems: 8 },
+          acceptSellerSignals: { type: "boolean" },
+        },
+      },
+    },
+  },
+};
+
+function fallbackSearchPhrases(prompt, intent) {
+  if (/event|wedding|party|anniversary|birthday|حفله|حفلة|مناسبه|مناسبة|زواج|عيد ميلاد|ذكرى/i.test(prompt)) {
+    return [{ term: "زواج", reason: "The core occasion connected to the customer's event-planning offer.", requiredSignals: ["زواج"], excludedSignals: ["تنظيم حفلات"], acceptSellerSignals: false }];
+  }
+  if (/\b(?:fifa|fc\s*2[67])\b|فيفا/i.test(prompt)) {
+    return [{ term: "FIFA", reason: "The exact core product word identifies active FIFA advertisers.", requiredSignals: ["FIFA", "فيفا"], excludedSignals: [], acceptSellerSignals: true }];
+  }
+  if (/(?:fabric|textile|قماش|نسيج)/i.test(prompt) && /(?:hoodie|hoodies|هودي|سويت\s*شيرت)/i.test(prompt)) {
+    return [{ term: "هودي", reason: "The single downstream product word identifies likely fabric buyers.", requiredSignals: ["هودي"], excludedSignals: [], acceptSellerSignals: true }];
+  }
+  const shortTerm = (value) => meaningfulTokens(value).slice(0, 1).join("").slice(0, 50);
+  const sources = [intent.productName, ...intent.behavioralSignals.map((item) => item.signal), ...intent.idealCustomerProfiles.map((item) => item.name)].filter(Boolean);
+  const term = shortTerm(intent.productName) || shortTerm(sources[0]) || "مطلوب";
+  return [{ term, reason: "The single core word that best represents what the customer is selling.", requiredSignals: [term], excludedSignals: [], acceptSellerSignals: true }];
+}
+
+async function createSearchPhrases(env, prompt, intent, procurement) {
+  const fallback = fallbackSearchPhrases(prompt, intent);
+  if (/\b(?:fifa|fc\s*2[67])\b|فيفا/i.test(prompt)
+    || (/(?:fabric|textile|قماش|نسيج)/i.test(prompt) && /(?:hoodie|hoodies|هودي|سويت\s*شيرت)/i.test(prompt))) {
+    return fallback;
+  }
+  try {
+    const result = await structuredResponse(
+      env,
+      "waslah_b2c_search_phrases",
+      searchPhraseSchema,
+      `Understand exactly what the customer is selling, then return exactly ONE marketplace search word that represents that product. Use the word an ordinary advertiser would put in an ad. Strip model years, versions, adjectives, professions, audience descriptions, and marketing language. Examples: FIFA 27 -> FIFA; gaming computer service -> كمبيوتر; wedding planning -> زواج; cat food -> قطط. The output term must contain exactly one meaningful token and must never be a sentence, persona, broad industry, tag, or category. acceptSellerSignals should be true because advertisers using this product word are the people whose phone numbers will be evaluated. Do not mention any platform, API, provider, scraping, tag, or category. Return only the schema.`,
+      { customer_request: prompt, offer: intent },
+      1400,
+    );
+    const seen = new Set();
+    const queries = (Array.isArray(result?.queries) ? result.queries : []).map((item) => ({
+      term: String(item.term || "").trim().slice(0, 80),
+      reason: String(item.reason || "").slice(0, 500),
+      requiredSignals: [...new Set((item.requiredSignals || []).map(String).filter(Boolean))].slice(0, 8),
+      excludedSignals: [...new Set((item.excludedSignals || []).map(String).filter(Boolean))].slice(0, 8),
+      acceptSellerSignals: Boolean(item.acceptSellerSignals),
+    })).filter((item) => item.term && meaningfulTokens(item.term).length === 1 && !seen.has(normalizeText(item.term)) && seen.add(normalizeText(item.term)));
+    return queries.length === 1 ? queries : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+const discoverySchema = {
+  type: "object", additionalProperties: false,
+  required: ["reply", "ready", "summary", "missing", "knownFacts", "answeredTopics", "recommendedTagIds", "confirmedTagIds", "confidence"],
+  properties: {
+    reply: { type: "string" }, ready: { type: "boolean" }, summary: { type: "string" },
+    missing: { type: "array", items: { type: "string" }, maxItems: 5 },
+    knownFacts: { type: "array", items: { type: "string" }, maxItems: 30 },
+    answeredTopics: { type: "array", items: { type: "string" }, maxItems: 20 },
+    recommendedTagIds: { type: "array", items: { type: "string" }, maxItems: 6 },
+    confirmedTagIds: { type: "array", items: { type: "string" }, maxItems: 6 },
+    confidence: { type: "number" },
+  },
+};
+
+function discoveryCandidates(text, taxonomy) {
+  const intent = fallbackIntent(text);
+  const recipeNames = new Set(recipeTagsForPrompt(recipeFor(text), text).map(normalizeText));
+  const preferred = taxonomy.filter((tag) => tag.names.some((name) => recipeNames.has(normalizeText(name))));
+  const seen = new Set();
+  return [...preferred, ...opportunityCandidates(intent, taxonomy)]
+    .filter((tag) => !seen.has(tag.id) && seen.add(tag.id)).slice(0, 50);
+}
+
+function uncertainReply(text) {
+  return /\b(?:idk|i don'?t know|not sure|no idea|wdym|what do you mean|lol|you (?:choose|tell me|recommend)|recommend for me)\b|ما ادري|مادري|لا اعرف|مو متأكد|وش تقصد|انت اختر|اقترح/i.test(String(text || ""));
+}
+
+export async function createB2CDiscoveryTurn(env, { message, transcript = [], language = "ar", dealIntent = "sell", businessContext = null } = {}) {
+  const cleanTranscript = (Array.isArray(transcript) ? transcript : []).map(String)
+    .filter((line) => !/^\s*(?:user|assistant)?\s*(?:mission|business|user) context\s*:/i.test(line)).slice(-80);
+  const currentMessage = normalizeText(message);
+  while (cleanTranscript.length) {
+    const last = cleanTranscript.at(-1);
+    const lastUserText = /^\s*user\s*:/i.test(last) ? last.replace(/^\s*user\s*:\s*/i, "") : "";
+    if (!lastUserText || normalizeText(lastUserText) !== currentMessage) break;
+    cleanTranscript.pop();
+  }
+  const conversationText = [...cleanTranscript, `user: ${message}`].join("\n");
+  const taxonomy = await loadHarajTaxonomy(env);
+  const candidates = discoveryCandidates(conversationText, taxonomy);
+  const byId = new Map(candidates.map((tag) => [tag.id, tag]));
+  const fallbackTags = candidates.slice(0, 3);
+  const fallbackReply = language === "ar"
+    ? `عادي—مو لازم تعرف التصنيفات. بناءً على عرضك، أقترح أن نبحث عن أشخاص تظهر لديهم احتياجات مرتبطة بـ ${fallbackTags.map((tag) => tag.name).join("، ")} مع استبعاد المنافسين. أي اتجاه أقرب لعميلك، أم تريدني أختار الأنسب؟`
+    : `That’s okay—you do not need to know the underlying categories. Based on your offer, I suggest looking for people showing needs related to ${fallbackTags.map((tag) => tag.name).join(", ")} while excluding competitors. Which direction is closest to your customer, or should I choose the best fit?`;
+  let result = null;
+  try {
+    result = await structuredResponse(env, "waslah_b2c_discovery", discoverySchema,
+      `You are Wasla's premium conversational growth strategist. Keep discovery concise and commercially useful. Learn only what materially improves this lead campaign: the exact offer and its variants, who could realistically buy it, geography, important exclusions, package price or campaign budget when relevant, capacity, timing, and success criteria. Never ask how many customers the user already has, whether they have a customer or lead list, whether they want to retarget existing customers, or request their customer data—the user is here to find new leads. Usually reach an actionable brief within four to six strong questions; do not prolong discovery for optional details. Be curious, commercially sharp, and natural—not a form, checklist, card picker, or technical planning screen. The conversation and memory context are authoritative: extract a cumulative knownFacts ledger, mark answeredTopics, and never ask for any fact already present there, even if it appeared many turns ago or before a page refresh. Before writing the next question, explicitly compare it against every earlier assistant question and every answered topic; choose a genuinely new, highest-value topic. Ask one thoughtful question per turn, using specific audience examples when helpful. Format longer replies for scanning: use a short opening sentence, then concise Markdown bullet points with one idea per bullet, and place the next question on its own final line. Never return a dense single-line paragraph containing several different ideas. Do not force bullets for a simple one-sentence question. Never mention or imply any platform, marketplace, API, data provider, category database, scraping method, tag ID, schema, path, or internal sourcing implementation. Speak only as Wasla. Infer accepted and rejected audience directions from ordinary answers and place accepted internal category IDs in confirmedTagIds. If the user is unsure, make a concrete recommendation, record the topic as answered by delegation, and advance instead of repeating or rephrasing the same question. Do not automatically exclude sellers or owners of closely related products when they could themselves be plausible customers; exclude only direct competitors and clearly irrelevant suppliers. Do not mark ready merely because you recommended categories: mark ready when the offer, geography, important constraints, and a useful audience direction are understood, or the customer explicitly delegates remaining choices. Reply in ${language === "ar" ? "Arabic" : "English"}. Return only the schema.`,
+      { latest_message: message, conversation: cleanTranscript, deal_intent: dealIntent, business_context: businessContext, audience_signal_candidates: candidates.map((tag) => ({ id: tag.id, name: tag.name, aliases: tag.names })) }, 1800);
+  } catch { result = null; }
+  const validIds = (values) => [...new Set((Array.isArray(values) ? values : []).map(String).filter((id) => byId.has(id)))].slice(0, 6);
+  if (!result) {
+    const delegated = uncertainReply(message) && /recommend|you (?:choose|tell me)|انت اختر|اقترح/i.test(String(message));
+    return { reply: fallbackReply, ready: delegated && fallbackTags.length > 0, summary: conversationText.slice(0, 1800), missing: delegated ? [] : [language === "ar" ? "اختيار أقرب مسار للعميل" : "the closest customer path"], knownFacts: [], answeredTopics: [], recommendedTagIds: fallbackTags.map((tag) => tag.id), confirmedTagIds: delegated ? fallbackTags.map((tag) => tag.id) : [], confidence: delegated ? 65 : 45 };
+  }
+  const recommendedTagIds = validIds(result.recommendedTagIds);
+  const confirmedTagIds = validIds(result.confirmedTagIds);
+  const delegated = /recommend|you (?:choose|tell me)|recommend for me|انت اختر|اقترح/i.test(String(message));
+  const lastAssistant = [...cleanTranscript].reverse().find((line) => /^assistant\s*:/i.test(line))?.replace(/^assistant\s*:\s*/i, "").trim();
+  let reply = String(result.reply || "").trim();
+  if (!reply || (lastAssistant && normalizeText(lastAssistant) === normalizeText(reply))) reply = fallbackReply;
+  const unexploredTagNames = recommendedTagIds.filter((id) => !confirmedTagIds.includes(id)).map((id) => byId.get(id)?.name).filter(Boolean);
+  if (result.ready && !delegated && unexploredTagNames.length && !/[?؟]\s*$/.test(reply)) {
+    reply += language === "ar"
+      ? ` بقي احتمال مرتبط: هل منشورات ${unexploredTagNames.join(" أو ")} قد تدل أيضاً على عميل مناسب لك؟`
+      : ` One related possibility remains: could posts in ${unexploredTagNames.join(" or ")} also signal a useful customer for you?`;
+  }
+  const hasDiscoveryExchange = cleanTranscript.some((line) => /^assistant\s*:/i.test(line));
+  const asksAnotherQuestion = /[?؟]\s*$/.test(reply);
+  return { reply, ready: Boolean(result.ready) && !asksAnotherQuestion && (delegated || (hasDiscoveryExchange && confirmedTagIds.length > 0)) && (!uncertainReply(message) || delegated), summary: String(result.summary || conversationText).slice(0, 2000), missing: (Array.isArray(result.missing) ? result.missing : []).map(String).slice(0, 5), knownFacts: (Array.isArray(result.knownFacts) ? result.knownFacts : []).map(String).slice(0, 30), answeredTopics: (Array.isArray(result.answeredTopics) ? result.answeredTopics : []).map(String).slice(0, 20), recommendedTagIds, confirmedTagIds, confidence: numeric(Number(result.confidence) > 0 && Number(result.confidence) <= 1 ? Number(result.confidence) * 100 : result.confidence, 55) };
+}
+
 const OPPORTUNITY_TAG_NAMES = [
   "مشاريع واستثمارات", "وظائف عمارة وبناء", "كهربائي مباني", "مقاول مباني",
   "وظائف بناء اخرى", "وظيفة شبكات واتصالات", "وظائف تقنية اخرى", "وظائف امن وسلامة",
@@ -448,14 +609,17 @@ function fallbackLeadPaths(intent, candidates) {
   }));
 }
 
-async function createLeadPaths(env, intent, taxonomy, prompt) {
+async function createLeadPaths(env, intent, taxonomy, prompt, preferredTagIds = []) {
   // A recognized offer must start from its validated marketplace categories.
   // Without this, broad AI wording can make a precise offer (for example,
   // Netflix subscriptions) inherit unrelated generic categories such as cars
   // or real estate before the customer has a chance to approve a path.
   const recipe = recipeFor(prompt);
   const recipeTags = recipeTagsForPrompt(recipe, prompt);
-  const candidates = recipeTags.length
+  const preferred = new Set((Array.isArray(preferredTagIds) ? preferredTagIds : []).map(String));
+  const candidates = preferred.size
+    ? taxonomy.filter((tag) => preferred.has(tag.id))
+    : recipeTags.length
     ? taxonomy.filter((tag) => tag.names.some((name) => recipeTags.some((recipeTag) => normalizeText(name) === normalizeText(recipeTag))))
     : opportunityCandidates(intent, taxonomy);
   if (!candidates.length) return [];
@@ -465,7 +629,7 @@ async function createLeadPaths(env, intent, taxonomy, prompt) {
       env,
       "waslah_b2c_lead_paths",
       leadPathSchema,
-      `You are Wasla's Lead Path Architect for Saudi B2C prospecting. Think like "sell shovels to gold miners": choose public activity created by people who may NEED the customer's offer, never merely the category where competitors sell that same offer. Build 2-4 distinct, causally defensible paths from the supplied taxonomy candidates only. A tag is a discovery surface, never sufficient proof. Each path must specify the advertiser role, mandatory evidence words/signals, exclusions, confidence from 0 to 100, and one natural confirmation question. requiredSignals and excludedSignals must be short literal Arabic search phrases likely to occur in an advertisement, not explanatory sentences. For contractors, prefer downstream project/hiring/renovation/installation signals over contractor-service advertisements. Reject animal, pet, agriculture, or unrelated categories unless the offer genuinely serves them. Return only the schema.`,
+      `You are Wasla's internal Lead Path Architect for Saudi B2C prospecting. You can observe only public advertisement text, category, city, author, recency, and contact availability. You cannot observe searches, browsing, clicks, engagement, or private intent. Think like "sell shovels to gold miners": choose posts created by people who may NEED the customer's offer, never merely the category where competitors sell that same offer. Build 2-4 distinct, causally defensible paths from supplied candidates only. DIRECT_INTENT paths must require literal demand language such as مطلوب، أبي، أحتاج، أبحث عن، من يوفر. A category is a discovery surface, never sufficient proof. Each path must specify advertiser role, mandatory evidence terms, vendor/competitor exclusions, confidence, and one natural confirmation question. Never mention or imply any platform, marketplace, API, data provider, tag, scraping method, or internal implementation in any generated field. Return only the schema.`,
       {
         customer_request: prompt,
         offer: intent,
@@ -478,7 +642,7 @@ async function createLeadPaths(env, intent, taxonomy, prompt) {
     result = null;
   }
   const byId = new Map(candidates.map((tag) => [tag.id, tag]));
-  const paths = (Array.isArray(result?.paths) ? result.paths : []).map((path) => {
+  const generatedPaths = (Array.isArray(result?.paths) ? result.paths : []).map((path) => {
     const tag = byId.get(String(path.tagId));
     if (!tag) return null;
     return {
@@ -496,6 +660,13 @@ async function createLeadPaths(env, intent, taxonomy, prompt) {
       selected: false,
     };
   }).filter(Boolean);
+  const seenTagIds = new Set();
+  const paths = generatedPaths.filter((path) => {
+    const key = String(path.tagId);
+    if (seenTagIds.has(key)) return false;
+    seenTagIds.add(key);
+    return true;
+  });
   return paths.length ? paths : fallbackLeadPaths(intent, candidates);
 }
 
@@ -512,7 +683,60 @@ function strategiesFromPaths(paths, intent, procurement) {
     reason: path.reason,
     pathId: path.id,
     advertiserRole: path.advertiserRole,
+    phase: "primary",
   }));
+}
+
+function strategiesFromSearchPhrases(phrases, intent, procurement) {
+  return (phrases || []).map((phrase, index) => ({
+    tagId: null,
+    tagName: phrase.term,
+    sourceMode: "search",
+    phase: "fallback",
+    searchTerm: phrase.term,
+    strategyType: procurement ? "DIRECT_INTENT" : "BEHAVIORAL_PROXY",
+    weight: Math.max(0.72, 0.9 - index * 0.05),
+    positiveKeywords: [...new Set([phrase.term, ...(phrase.requiredSignals || [])])].slice(0, 20),
+    negativeKeywords: [...new Set(phrase.excludedSignals || [])].slice(0, 20),
+    requiresKeywordMatch: true,
+    cities: intent.market.cities,
+    reason: phrase.reason,
+    pathId: `search-${createHash("sha1").update(normalizeText(phrase.term)).digest("hex").slice(0, 12)}`,
+    advertiserRole: procurement ? "An individual publicly offering the requested item" : "A person whose public activity indicates a plausible need for the customer's offer",
+    acceptSellerSignals: Boolean(phrase.acceptSellerSignals),
+  }));
+}
+
+async function createRecoveryStrategies(env, campaign, plan, round) {
+  const tried = (plan.strategies || []).map((strategy) => strategy.searchTerm || strategy.tagName).filter(Boolean);
+  const used = new Set(tried.map(normalizeText));
+  try {
+    const result = await structuredResponse(
+      env,
+      "waslah_b2c_recovery_paths",
+      searchPhraseSchema,
+      `Return exactly ONE new single-word synonym for the product being sold. The original search word was exhausted. Do not return a category, profession, persona, phrase, sentence, or unrelated product. Do not repeat a tried word. Never mention a platform, provider, API, scraping, or internal implementation. Return only the schema.`,
+      {
+        customer_request: campaign.original_prompt,
+        offer: plan.product,
+        target_profiles: plan.targetProfiles,
+        tried_phrases: tried,
+        prior_preflight: plan.preflight,
+      },
+      1400,
+    );
+    const phrases = (Array.isArray(result?.queries) ? result.queries : []).map((item) => ({
+      term: String(item.term || "").trim().slice(0, 80),
+      reason: String(item.reason || "").slice(0, 500),
+      requiredSignals: [...new Set((item.requiredSignals || []).map(String).filter(Boolean))].slice(0, 8),
+      excludedSignals: [...new Set((item.excludedSignals || []).map(String).filter(Boolean))].slice(0, 8),
+      acceptSellerSignals: Boolean(item.acceptSellerSignals),
+    })).filter((item) => item.term && meaningfulTokens(item.term).length === 1 && !used.has(normalizeText(item.term)) && used.add(normalizeText(item.term)));
+    return strategiesFromSearchPhrases(phrases, { market: { cities: plan.strategies?.[0]?.cities || [] } }, plan.dealIntent === "buy")
+      .map((strategy) => ({ ...strategy, phase: `recovery-${round}`, recoveryRound: round }));
+  } catch {
+    return [];
+  }
 }
 
 export function selectB2CLeadPaths(planning, selection) {
@@ -526,16 +750,35 @@ export function selectB2CLeadPaths(planning, selection) {
   const selectedIds = new Set(requested);
   const selected = paths.filter((path) => selectedIds.has(String(path.id)) || selectedIds.has(String(path.tagId)));
   if (!selected.length) throw new Error("Choose at least one proposed lead path before sourcing.");
+  const selectedPreviews = selected.map((path) => path.sourcePreview?.status).filter(Boolean);
+  const selectedSourceViability = !selectedPreviews.length || selectedPreviews.every((status) => status === "untested")
+    ? "untested"
+    : selectedPreviews.some((status) => status === "viable") ? "viable" : "unsupported";
   return {
     ...planning,
     acquisitionPlan: {
       ...planning.acquisitionPlan,
       leadPaths: paths.map((path) => ({ ...path, selected: selected.some((item) => item.id === path.id) })),
       selectedPathIds: selected.map((path) => path.id),
+      sourceViability: selectedSourceViability,
       pathSelectionRequired: false,
       targetProfiles: planning.acquisitionPlan.targetProfiles,
-      strategies: strategiesFromPaths(selected, planning.intent, planning.acquisitionPlan.dealIntent === "buy"),
-      preflight: { ...planning.acquisitionPlan.preflight, aligned: true, selectedTags: selected.map((path) => path.tagName), unexpectedTags: [] },
+      // The approved path tells the planner which audience the customer chose,
+      // but execution is query-only. Category/tag crawling created broad,
+      // misleading audiences and is deliberately excluded here.
+      strategies: strategiesFromSearchPhrases(
+        planning.acquisitionPlan.searchPhrases,
+        planning.intent,
+        planning.acquisitionPlan.dealIntent === "buy",
+      ).map((strategy) => ({ ...strategy, phase: "primary" })),
+      preflight: {
+        ...planning.acquisitionPlan.preflight,
+        aligned: true,
+        selectedTags: [],
+        selectedQueries: planning.acquisitionPlan.searchPhrases.map((phrase) => phrase.term),
+        confirmedAudiencePaths: selected.map((path) => path.name),
+        unexpectedTags: [],
+      },
     },
   };
 }
@@ -580,13 +823,53 @@ function strategyTypeFor(match, index) {
   return index === 0 ? "ADJACENT_INTENT" : "BEHAVIORAL_PROXY";
 }
 
-export async function createB2CPlan(env, prompt) {
+export async function createB2CPlan(env, prompt, options = {}) {
   const procurement = /\[PROCUREMENT_FROM_CONSUMERS\]/.test(prompt);
   const intent = await createLeadIntent(env, prompt);
+  const searchPhrases = await createSearchPhrases(env, prompt, intent, procurement);
+  const queryStrategies = strategiesFromSearchPhrases(searchPhrases, intent, procurement)
+    .map((strategy) => ({ ...strategy, phase: "primary" }));
+  return {
+    intent,
+    acquisitionPlan: {
+      product: intent.productName,
+      dealIntent: procurement ? "buy" : "sell",
+      targetProfiles: intent.idealCustomerProfiles.map((profile) => profile.name),
+      leadPaths: [],
+      searchPhrases,
+      searchStrategyVersion: 4,
+      sourceViability: "query_only",
+      selectedPathIds: [],
+      pathSelectionRequired: false,
+      strategies: queryStrategies,
+      qualification: {
+        minimumLeadScore: numeric(env.B2C_MINIMUM_LEAD_SCORE, 65),
+        minimumIdentityConfidence: numeric(env.B2C_MINIMUM_IDENTITY_CONFIDENCE, 60),
+        minimumPurchasePropensity: numeric(env.B2C_MINIMUM_PURCHASE_PROPENSITY, 55),
+      },
+      preflight: {
+        aligned: true,
+        matchedAudience: intent.idealCustomerProfiles.map((profile) => profile.name).slice(0, 4),
+        expectedTags: [],
+        selectedTags: [],
+        selectedQueries: searchPhrases.map((phrase) => phrase.term),
+        unexpectedTags: [],
+      },
+    },
+    taxonomyMatches: [],
+  };
+
+  /* Legacy taxonomy planning is intentionally unreachable. It remains below
+     temporarily so existing serialized plans can still be understood by older
+     admin audit records, but no new campaign executes it. */
   const taxonomy = await loadHarajTaxonomy(env);
   if (!procurement) {
-    const leadPaths = await createLeadPaths(env, intent, taxonomy, prompt);
+    const proposedLeadPaths = await createLeadPaths(env, intent, taxonomy, prompt, options.preferredTagIds);
+    const leadPaths = await previewLeadPaths(env, intent, proposedLeadPaths);
     if (!leadPaths.length) throw new Error("Wasla needs a more specific product description before it can build a reliable B2C audience.");
+    const previewed = leadPaths.filter((path) => path.sourcePreview?.status !== "untested");
+    const viable = leadPaths.filter((path) => path.sourcePreview?.status === "viable");
+    const sourceViability = !previewed.length ? "untested" : viable.length ? "viable" : "unsupported";
     return {
       intent,
       acquisitionPlan: {
@@ -594,6 +877,9 @@ export async function createB2CPlan(env, prompt) {
         dealIntent: "sell",
         targetProfiles: intent.idealCustomerProfiles.map((profile) => profile.name),
         leadPaths,
+        searchPhrases,
+        searchStrategyVersion: 3,
+        sourceViability,
         selectedPathIds: [],
         pathSelectionRequired: true,
         strategies: [],
@@ -619,7 +905,7 @@ export async function createB2CPlan(env, prompt) {
   if (!selected.length) throw new Error("Wasla needs a more specific product description before it can build a reliable B2C audience.");
   const recipe = recipeFor(prompt);
   const exactOfferTokens = meaningfulTokens(intent.productName).slice(0, 8);
-  const strategies = selected.map((match, index) => {
+  const categoryStrategies = selected.map((match, index) => {
     const strategyType = strategyTypeFor(match, index);
     const recipeWeight = strategyType === "DIRECT_INTENT" ? 1 : strategyType === "ADJACENT_INTENT" ? 0.85 : strategyType === "BEHAVIORAL_PROXY" ? 0.78 : 0.72;
     return {
@@ -638,13 +924,17 @@ export async function createB2CPlan(env, prompt) {
   });
   const recipeTags = recipeTagsForPrompt(recipe, prompt);
   const expectedTags = new Set(recipeTags.map(normalizeText));
-  const unexpectedTags = recipe ? strategies.map((strategy) => strategy.tagName).filter((tag) => !expectedTags.has(normalizeText(tag))) : [];
+  const unexpectedTags = recipe ? categoryStrategies.map((strategy) => strategy.tagName).filter((tag) => !expectedTags.has(normalizeText(tag))) : [];
+  const strategies = strategiesFromSearchPhrases(searchPhrases, intent, procurement)
+    .map((strategy) => ({ ...strategy, phase: "primary" }));
   return {
     intent,
     acquisitionPlan: {
       product: intent.productName,
       dealIntent: procurement ? "buy" : "sell",
       targetProfiles: intent.idealCustomerProfiles.map((profile) => profile.name),
+      searchPhrases,
+      searchStrategyVersion: 3,
       strategies,
       qualification: {
         minimumLeadScore: numeric(env.B2C_MINIMUM_LEAD_SCORE, 65),
@@ -655,7 +945,7 @@ export async function createB2CPlan(env, prompt) {
         aligned: unexpectedTags.length === 0,
         matchedAudience: recipe?.profiles?.slice(0, 4) || intent.idealCustomerProfiles.map((profile) => profile.name).slice(0, 4),
         expectedTags: recipeTags,
-        selectedTags: strategies.map((strategy) => strategy.tagName),
+        selectedTags: categoryStrategies.map((strategy) => strategy.tagName),
         unexpectedTags,
       },
     },
@@ -664,9 +954,25 @@ export async function createB2CPlan(env, prompt) {
 }
 
 export async function validateB2CPlan(env, prompt, supplied) {
+  // Rebuild every launch from the customer's request. This guarantees that
+  // legacy saved tag/category plans cannot leak back into execution.
+  const queryOnlyPlan = await createB2CPlan(env, prompt);
+  if (!queryOnlyPlan.acquisitionPlan.strategies?.length) {
+    throw new Error("Wasla needs a clear product word before starting this campaign.");
+  }
+  return queryOnlyPlan;
+
   const procurement = /\[PROCUREMENT_FROM_CONSUMERS\]/.test(prompt);
   let plan;
   if (!procurement && supplied?.acquisitionPlan?.leadPaths?.length) {
+    const persistedPhrases = supplied.acquisitionPlan.searchPhrases;
+    const phrasesNeedRefresh = Number(supplied.acquisitionPlan.searchStrategyVersion || 0) < 3
+      || !Array.isArray(persistedPhrases)
+      || persistedPhrases.length !== 3
+      || persistedPhrases.some((phrase) => meaningfulTokens(phrase?.term).length > 2 || typeof phrase?.acceptSellerSignals !== "boolean");
+    const refreshedSearchPlan = phrasesNeedRefresh
+      ? await createB2CPlan(env, prompt)
+      : null;
     const taxonomy = await loadHarajTaxonomy(env);
     const validTags = new Set(taxonomy.map((tag) => tag.id));
     const cleanPaths = supplied.acquisitionPlan.leadPaths.filter((path) => validTags.has(String(path.tagId)));
@@ -677,7 +983,12 @@ export async function validateB2CPlan(env, prompt, supplied) {
       : cleanPaths.filter((path) => path.selected === true).map((path) => path.id);
     plan = selectB2CLeadPaths({
       ...supplied,
-      acquisitionPlan: { ...supplied.acquisitionPlan, leadPaths: cleanPaths },
+      acquisitionPlan: {
+        ...supplied.acquisitionPlan,
+        searchPhrases: refreshedSearchPlan?.acquisitionPlan?.searchPhrases || supplied.acquisitionPlan.searchPhrases,
+        searchStrategyVersion: refreshedSearchPlan?.acquisitionPlan?.searchStrategyVersion || supplied.acquisitionPlan.searchStrategyVersion,
+        leadPaths: cleanPaths,
+      },
     }, selectedIds.join(","));
   } else {
     plan = await createB2CPlan(env, prompt);
@@ -701,7 +1012,7 @@ function harajHeaders(env) {
 }
 
 async function harajGraphql(env, url, query, variables, options = {}) {
-  if (!url || !env.HARAJ_BEARER_TOKEN) throw new Error("Haraj API configuration is incomplete.");
+  if (!url || !env.HARAJ_BEARER_TOKEN) throw new Error("The sourcing connection is incomplete.");
   const attempts = numeric(options.attempts ?? env.HARAJ_REQUEST_RETRIES, 3, 1, 5);
   let lastError;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -712,7 +1023,7 @@ async function harajGraphql(env, url, query, variables, options = {}) {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload.errors?.length) {
-        const requestError = new Error(payload.errors?.[0]?.message || `Haraj returned ${response.status}`);
+        const requestError = new Error(payload.errors?.[0]?.message || `The sourcing provider returned ${response.status}`);
         requestError.status = response.status;
         requestError.retryAfter = response.headers.get("retry-after");
         throw requestError;
@@ -733,6 +1044,11 @@ async function harajGraphql(env, url, query, variables, options = {}) {
 export async function fetchHarajPosts(env, input) {
   const data = await harajGraphql(env, env.HARAJ_POSTS_URL || env.HARAJ_GRAPHQL_BASE_URL, POSTS_QUERY, input);
   return data?.posts || { items: [], pageInfo: { hasNextPage: false } };
+}
+
+export async function fetchHarajSearch(env, input) {
+  const data = await harajGraphql(env, env.HARAJ_SEARCH_URL || env.HARAJ_GRAPHQL_BASE_URL || env.HARAJ_POSTS_URL, SEARCH_QUERY, input);
+  return data?.search || { items: [], pageInfo: { hasNextPage: false } };
 }
 
 export async function fetchHarajPostContact(env, postId) {
@@ -762,8 +1078,62 @@ function normalizeCandidate(post, strategy) {
     geoCity: post.geoCity || null, geoNeighborhood: post.geoNeighborhood || null,
     tags: Array.isArray(post.tags) ? post.tags.map(String) : [], postDate: Number(post.postDate || 0), updateDate: Number(post.updateDate || 0),
     price: post.price?.inputPrice == null ? null : Number(post.price.inputPrice), url: post.URL || null,
-    matchedStrategy: { tagName: strategy.tagName, strategyType: strategy.strategyType, weight: strategy.weight },
+    matchedStrategy: { tagName: strategy.tagName, strategyType: strategy.strategyType, weight: strategy.weight, sourceMode: strategy.sourceMode || "category", searchTerm: strategy.searchTerm || null },
   };
+}
+
+async function previewLeadPaths(env, intent, paths) {
+  if (!paths.length || !env.HARAJ_BEARER_TOKEN || !(env.HARAJ_POSTS_URL || env.HARAJ_GRAPHQL_BASE_URL)) {
+    return paths.map((path) => ({ ...path, sourcePreview: { status: "untested", sampleSize: 0, qualified: 0, rate: 0 } }));
+  }
+  const limit = numeric(env.B2C_PATH_PREVIEW_LIMIT, 30, 10, 50);
+  const page = numeric(env.HARAJ_DEFAULT_PAGE, 0, 0, 1000);
+  return Promise.all(paths.map(async (path) => {
+    const strategy = strategiesFromPaths([path], intent, false)[0];
+    const plan = {
+      product: intent.productName,
+      dealIntent: "sell",
+      targetProfiles: intent.idealCustomerProfiles.map((profile) => profile.name),
+      strategies: [strategy],
+      preflight: { aligned: true },
+      qualification: { minimumLeadScore: numeric(env.B2C_MINIMUM_LEAD_SCORE, 65) },
+    };
+    try {
+      const result = await fetchHarajPosts(env, {
+        tag: strategy.tagName,
+        cities: strategy.cities?.length ? strategy.cities.map(harajCityName) : null,
+        page,
+        limit,
+      });
+      const items = Array.isArray(result.items) ? result.items : [];
+      const scored = items.map((post) => scoreB2CCandidate(normalizeCandidate(post, strategy), plan));
+      const qualified = scored.filter((item) => item.isQualified && item.score >= plan.qualification.minimumLeadScore).length;
+      const demandPosts = scored.filter((item) => item.demandEvidence).length;
+      const rate = items.length ? qualified / items.length : 0;
+      return {
+        ...path,
+        sourcePreview: {
+          status: qualified > 0 ? "viable" : "unsupported",
+          sampleSize: items.length,
+          qualified,
+          demandPosts,
+          rate: Number(rate.toFixed(4)),
+          checkedAt: new Date().toISOString(),
+        },
+      };
+    } catch (error) {
+      return {
+        ...path,
+        sourcePreview: {
+          status: "untested",
+          sampleSize: 0,
+          qualified: 0,
+          rate: 0,
+          error: String(error?.message || error).slice(0, 240),
+        },
+      };
+    }
+  }));
 }
 
 function recencyScore(timestamp) {
@@ -773,26 +1143,43 @@ function recencyScore(timestamp) {
   return Math.max(10, Math.round(100 - days * 1.5));
 }
 
-function cheapQualification(candidate, plan) {
+function signalTerms(keyword) {
+  return meaningfulTokens(keyword).filter((token) => token.length > 2 && !SIGNAL_STOP_WORDS.has(token));
+}
+
+function matchedKeywordSignals(text, keywords) {
+  const textTokens = new Set(tokens(text));
+  return (keywords || []).filter((keyword) => {
+    const normalized = normalizeText(keyword);
+    if (!normalized) return false;
+    const terms = signalTerms(keyword);
+    if (!terms.length) return false;
+    if (text.includes(normalized)) return true;
+    const hits = terms.filter((term) => textTokens.has(term) || [...textTokens].some((candidate) => candidate.length > 4 && term.length > 4 && (candidate.includes(term) || term.includes(candidate))));
+    return terms.length === 1 ? hits.length === 1 : hits.length >= Math.min(2, terms.length);
+  });
+}
+
+export function scoreB2CCandidate(candidate, plan) {
   const procurement = plan.dealIntent === "buy";
   const strategy = plan.strategies.find((item) => item.tagName === candidate.matchedStrategy.tagName) || candidate.matchedStrategy;
   const text = normalizeText(`${candidate.title} ${candidate.bodyText} ${candidate.tags.join(" ")}`);
-  const positive = (strategy.positiveKeywords || []).filter((keyword) => {
-    const normalized = normalizeText(keyword);
-    return normalized && !GENERIC_INTENT_TOKENS.has(normalized) && text.includes(normalized);
-  });
+  const positive = matchedKeywordSignals(text, strategy.positiveKeywords);
+  const hasDemandMarker = DEMAND_MARKER.test(`${candidate.title} ${candidate.bodyText}`);
+  const hasSupplyMarker = SUPPLY_MARKER.test(`${candidate.title} ${candidate.bodyText}`);
   // Haraj categories are Arabic while many customer briefs are English. A
   // candidate returned inside a preflight-validated category is itself an
   // observable relevance signal, even when no English brief token appears in
   // the Arabic advertisement body.
-  const meetsRequiredKeyword = !strategy.requiresKeywordMatch || positive.length > 0;
+  const requiresDemandPost = !procurement && strategy.strategyType === "DIRECT_INTENT";
+  const meetsRequiredKeyword = (!strategy.requiresKeywordMatch || positive.length > 0) && (!requiresDemandPost || hasDemandMarker);
   const categoryMatched = plan.preflight?.aligned !== false && Boolean(strategy.tagName) && meetsRequiredKeyword;
   const positiveSignalCount = positive.length + (categoryMatched ? 1 : 0);
   const negative = (strategy.negativeKeywords || []).filter((keyword) => text.includes(normalizeText(keyword)));
   const exactOffer = meaningfulTokens(plan.product);
   const exactOfferHits = exactOffer.filter((token) => text.includes(token)).length;
-  const activeSeller = /بيع|للبيع|متوفر|أعرض|اعرض|sell|for sale|available|owner/i.test(text);
-  const likelyCompetitor = !procurement && (negative.length > 0 || (strategy.strategyType === "DIRECT_INTENT" && exactOfferHits > 0 && /بيع|للبيع|متجر|نوفر|sell|shop|store|متوفر/i.test(text)));
+  const activeSeller = hasSupplyMarker || /بيع|أعرض|اعرض|owner/i.test(text);
+  const likelyCompetitor = !procurement && (negative.length > 0 || (!strategy.acceptSellerSignals && strategy.strategyType === "DIRECT_INTENT" && hasSupplyMarker && (exactOfferHits > 0 || positive.length > 0)));
   const identityConfidence = numeric(42 + strategy.weight * 35 + Math.min(positiveSignalCount * 7, 20), 60);
   const purchasePropensity = numeric(35 + strategy.weight * 30 + Math.min(positiveSignalCount * 8, 24) + (procurement && activeSeller ? 18 : 0) - (likelyCompetitor ? 55 : 0), 55);
   const evidenceStrength = numeric(38 + Math.min((candidate.bodyText.length / 80), 28) + candidate.tags.length * 4 + positiveSignalCount * 6, 55);
@@ -806,12 +1193,14 @@ function cheapQualification(candidate, plan) {
       - competitorProbability * 0.25 - irrelevantProbability * 0.15,
     0,
   );
-  const marketplaceRole = procurement && activeSeller ? "SELLER" : likelyCompetitor ? "COMPETITOR" : strategy.strategyType === "OWNERSHIP_PROXY" ? "OWNER" : "LIKELY_BUYER";
+  const marketplaceRole = procurement && activeSeller ? "SELLER" : likelyCompetitor ? "COMPETITOR" : !procurement && hasSupplyMarker && !hasDemandMarker ? (strategy.acceptSellerSignals ? "OWNER" : "SERVICE_PROVIDER") : strategy.strategyType === "OWNERSHIP_PROXY" ? "OWNER" : "LIKELY_BUYER";
+  const roleAllowed = procurement ? ["SELLER", "OWNER"].includes(marketplaceRole) : ["LIKELY_BUYER", "OWNER"].includes(marketplaceRole);
   return {
-    isQualified: score >= 45 && !likelyCompetitor && meetsRequiredKeyword,
+    isQualified: score >= 45 && !likelyCompetitor && meetsRequiredKeyword && roleAllowed,
     marketplaceRole, identityConfidence, purchasePropensity, evidenceStrength, recencyScore: recency,
     sellerActivityScore: 55, geographyFit, competitorProbability, irrelevantProbability,
     matchedSignals: positive.length ? positive : categoryMatched ? [candidate.matchedStrategy.tagName] : [], negativeSignals: negative,
+    demandEvidence: hasDemandMarker, supplyEvidence: hasSupplyMarker,
     explanation: procurement && activeSeller
       ? "The listing is an active offer from a potential individual seller matching the purchase request."
       : likelyCompetitor
@@ -835,7 +1224,7 @@ const qualificationSchema = {
 
 async function qualifyCandidate(env, candidate, plan) {
   const procurement = plan.dealIntent === "buy";
-  const cheap = cheapQualification(candidate, plan);
+  const cheap = scoreB2CCandidate(candidate, plan);
   if (!cheap.isQualified) return cheap;
   if (!env.OPENAI_API_KEY || String(env.B2C_LLM_QUALIFICATION_ENABLED || "false") !== "true") {
     return {
@@ -1053,6 +1442,23 @@ async function updateCampaign(database, campaignId, status, stats, errorMessage 
   await database("b2c_campaigns").where({ id: campaignId }).update({ status, stats: dbJson(stats), error_message: errorMessage, updated_at: new Date().toISOString() });
 }
 
+const B2C_EXECUTION_RULES = [
+  { id: "exact-count-contract", label: "Exact requested count is the completion contract" },
+  { id: "verified-phone-only", label: "Only leads with a valid Saudi mobile number are delivered and charged" },
+  { id: "organization-wide-deduplication", label: "Never redeliver the same seller or phone to the same workspace" },
+  { id: "fresh-page-cursors", label: "Every continuation advances each path to fresh pages" },
+  { id: "buyer-side-paths", label: "Search downstream buyer, ownership, project and need signals—not direct competitors" },
+  { id: "adaptive-recovery", label: "When approved paths run dry, create new non-duplicate buyer-side paths automatically" },
+  { id: "authenticated-contact-resolution", label: "Resolve contact data with the configured authenticated connection" },
+  { id: "no-partial-success", label: "A short batch is never marked as a completed campaign" },
+];
+
+function appendExecutionEvent(stats, code, detail = {}) {
+  const ledger = Array.isArray(stats.executionLedger) ? stats.executionLedger : [];
+  ledger.push({ at: new Date().toISOString(), pass: Number(stats.searchPass || 0), code, ...detail });
+  stats.executionLedger = ledger.slice(-400);
+}
+
 export async function persistQualifiedB2CLead(database, campaign, candidate, qualification, contact) {
   return database.transaction(async (trx) => {
     const sellerLead = await mergeSellerLead(trx, campaign, candidate, qualification, contact);
@@ -1091,48 +1497,79 @@ export async function runB2CCampaign({ database, env, campaignId, logger }) {
     relevanceSampleQualified: Number(previousStats.relevanceSampleQualified || 0),
     uniqueCandidatesTotal: Number(previousStats.uniqueCandidatesTotal || 0),
     duplicateCandidatesSkippedTotal: Number(previousStats.duplicateCandidatesSkippedTotal || 0),
+    recoveryRound: Number(previousStats.recoveryRound || 0),
+    executionRules: B2C_EXECUTION_RULES,
+    executionLedger: Array.isArray(previousStats.executionLedger) ? previousStats.executionLedger : [],
+    exactCountContract: { requested: Number(campaign.target_lead_count || 0), delivered: existingCount, remaining: Math.max(0, Number(campaign.target_lead_count || 0) - existingCount) },
   };
   await updateCampaign(database, campaign.id, "RUNNING", stats);
   try {
-    const basePages = numeric(env.HARAJ_MAX_PAGES_PER_STRATEGY, 3, 1, 20);
     const limit = numeric(env.HARAJ_DEFAULT_LIMIT, 50, 1, 100);
-    const strategyCount = Math.max(1, (plan.strategies || []).length);
-    const maxAds = numeric(env.B2C_MAX_ADS_PER_CAMPAIGN, 20_000, 500, 100_000);
-    const remainingLeads = Math.max(0, Number(campaign.target_lead_count) - existingCount);
-    const observedYield = existingCount > 0 && Number(previousStats.postsFetched || 0) > 0
-      ? existingCount / Number(previousStats.postsFetched)
-      : 0.01;
-    const projectedPages = Math.ceil((remainingLeads * 1.35) / (Math.max(observedYield, 0.004) * limit * strategyCount));
-    const remainingAdBudget = Math.max(0, maxAds - Number(previousStats.postsFetched || 0));
-    const pagesAllowedByBudget = Math.floor(remainingAdBudget / (limit * strategyCount));
-    // Persist and expose progress after a small group of pages instead of holding
-    // one very large acquisition pass open. The queued continuation below keeps
-    // moving through fresh pages until the requested lead count is reached.
-    const pagesPerStreamingPass = numeric(env.B2C_STREAMING_PAGES_PER_PASS, 1, 1, 20);
-    const maxPages = pagesAllowedByBudget > 0
-      ? Math.max(1, Math.min(Math.max(basePages, projectedPages), pagesAllowedByBudget, pagesPerStreamingPass))
+    const strategies = Array.isArray(plan.strategies) ? plan.strategies : [];
+    const configuredMaxAds = Number(env.B2C_MAX_ADS_PER_CAMPAIGN || 0);
+    // Zero means exhaustive. A deployment may still set an explicit emergency
+    // ceiling, but ordinary campaigns keep paging until the target or true end.
+    const maxAds = Number.isFinite(configuredMaxAds) && configuredMaxAds > 0
+      ? Math.min(Math.floor(configuredMaxAds), 10_000_000)
       : 0;
-    const defaultPage = numeric(env.HARAJ_DEFAULT_PAGE, 0, 0, 1000);
-    const startPage = Number.isFinite(Number(previousStats.nextPage))
-      ? numeric(previousStats.nextPage, defaultPage, 0, 1000)
-      : existingCount > 0 && Number(previousStats.postsFetched || 0) > 0
-        ? defaultPage + basePages
-        : defaultPage;
+    const pagesPerStreamingPass = numeric(env.B2C_STREAMING_PAGES_PER_PASS, 1, 1, 20);
+    const defaultPage = Math.max(0, Math.floor(Number(env.HARAJ_DEFAULT_PAGE || 0)));
+    const strategyProgress = jsonValue(previousStats.strategyProgress, {}) || {};
+    const strategyKey = (strategy) => String(strategy.pathId || strategy.tagId || strategy.tagName);
+    for (const strategy of strategies) {
+      const key = strategyKey(strategy);
+      const saved = strategyProgress[key] || {};
+      strategyProgress[key] = {
+        tagName: strategy.tagName,
+        nextPage: Math.max(defaultPage, Math.floor(Number(saved.nextPage ?? defaultPage))),
+        pagesFetched: Math.max(0, Math.floor(Number(saved.pagesFetched || 0))),
+        postsFetched: Math.max(0, Math.floor(Number(saved.postsFetched || 0))),
+        exhausted: Boolean(saved.exhausted),
+        lastPageSignature: saved.lastPageSignature || null,
+        repeatedPageCount: Math.max(0, Math.floor(Number(saved.repeatedPageCount || 0))),
+      };
+    }
     stats.searchPass = Number(previousStats.searchPass || 0) + 1;
-    stats.pageStart = startPage;
-    stats.pagesPerStrategy = maxPages;
-    stats.nextPage = startPage + maxPages;
-    stats.maxAds = maxAds;
-    stats.sourceExhausted = false;
+    appendExecutionEvent(stats, "PASS_STARTED", { delivered: stats.uniqueLeads, requested: Number(campaign.target_lead_count), recoveryRound: stats.recoveryRound });
+    const fallbackWasActive = Boolean(previousStats.searchFallbackActivated || stats.uniqueLeads > 0 || Number(previousStats.searchPass || 0) > 0);
+    stats.searchFallbackActivated = fallbackWasActive;
+    stats.pagesPerStrategy = pagesPerStreamingPass;
+    stats.strategyProgress = strategyProgress;
+    stats.maxAds = maxAds || null;
+    stats.sourceExhausted = strategies.length === 0 || strategies.every((strategy) => strategyProgress[strategyKey(strategy)].exhausted);
     const qualifiedCandidates = [];
     let passPostsEvaluated = 0;
     let passQualified = 0;
-    let exhaustedStrategies = 0;
-    for (const strategy of plan.strategies || []) {
-      for (let page = startPage, pageCount = 0; pageCount < maxPages; page += 1, pageCount += 1) {
-        const result = await fetchHarajPosts(env, { tag: strategy.tagName, cities: strategy.cities?.length ? strategy.cities.map(harajCityName) : null, page, limit });
+    const activeStrategies = fallbackWasActive
+      ? strategies
+      : strategies.filter((strategy) => strategy.phase !== "fallback");
+    for (const strategy of activeStrategies) {
+      const progress = strategyProgress[strategyKey(strategy)];
+      if (progress.exhausted || (maxAds > 0 && stats.postsFetched >= maxAds)) continue;
+      for (let pageCount = 0; pageCount < pagesPerStreamingPass; pageCount += 1) {
+        if (maxAds > 0 && stats.postsFetched >= maxAds) break;
+        const page = progress.nextPage;
+        const result = strategy.sourceMode === "search"
+          ? await fetchHarajSearch(env, { search: strategy.searchTerm, cities: strategy.cities?.length ? strategy.cities.map(harajCityName) : null, page, limit })
+          : await fetchHarajPosts(env, { tag: strategy.tagName, cities: strategy.cities?.length ? strategy.cities.map(harajCityName) : null, page, limit });
         const items = Array.isArray(result.items) ? result.items : [];
         stats.postsFetched += items.length;
+        progress.postsFetched += items.length;
+        progress.pagesFetched += 1;
+        progress.nextPage = page + 1;
+        const pageSignature = createHash("sha1").update(items.map((item) => String(item?.id || "")).join(",")).digest("hex");
+        progress.repeatedPageCount = pageSignature === progress.lastPageSignature ? progress.repeatedPageCount + 1 : 0;
+        progress.lastPageSignature = pageSignature;
+        if (!result.pageInfo?.hasNextPage || progress.repeatedPageCount >= 2) progress.exhausted = true;
+        appendExecutionEvent(stats, "PAGE_FETCHED", {
+          path: strategy.tagName,
+          mode: strategy.sourceMode || "category",
+          phase: strategy.phase || "primary",
+          page,
+          returned: items.length,
+          nextPage: progress.nextPage,
+          exhausted: progress.exhausted,
+        });
         await updateCampaign(database, campaign.id, "RUNNING", stats);
         for (const post of items) {
           const candidate = normalizeCandidate(post, strategy);
@@ -1152,14 +1589,14 @@ export async function runB2CCampaign({ database, env, campaignId, logger }) {
           const minimumRate = Math.max(0, Math.min(1, Number(env.B2C_RELEVANCE_SAMPLE_MIN_RATE || 0.01)));
           const broadRate = Math.max(minimumRate, Math.min(1, Number(env.B2C_RELEVANCE_SAMPLE_BROAD_RATE || 0.45)));
           const aligned = plan.preflight?.aligned !== false;
-          const failed = !aligned || sampleRate < minimumRate;
+          const failed = !aligned;
           stats.relevanceSample = {
             size: stats.relevanceSamplePosts,
             qualified: stats.relevanceSampleQualified,
             rate: Number(sampleRate.toFixed(4)),
             aligned,
             selectedTags: plan.preflight?.selectedTags || plan.strategies.map((item) => item.tagName),
-            status: failed ? "failed" : sampleRate > broadRate ? "warning" : "passed",
+            status: failed ? "failed" : (sampleRate < minimumRate || sampleRate > broadRate) ? "warning" : "passed",
             reason: !aligned
               ? "The selected source categories do not match the requested audience."
               : sampleRate < minimumRate
@@ -1172,13 +1609,10 @@ export async function runB2CCampaign({ database, env, campaignId, logger }) {
           if (failed) throw new Error(`B2C relevance preflight failed: ${stats.relevanceSample.reason}`);
         }
         await updateCampaign(database, campaign.id, "RUNNING", stats);
-        if (!result.pageInfo?.hasNextPage) {
-          exhaustedStrategies += 1;
-          break;
-        }
+        if (progress.exhausted) break;
       }
     }
-    stats.sourceExhausted = exhaustedStrategies >= strategyCount;
+    stats.sourceExhausted = strategies.length === 0 || strategies.every((strategy) => strategyProgress[strategyKey(strategy)].exhausted);
 
     const sellerKey = (candidate) => candidate.authorId != null
       ? `author:${candidate.authorId}`
@@ -1215,9 +1649,10 @@ export async function runB2CCampaign({ database, env, campaignId, logger }) {
 
     const cacheWindowHours = numeric(env.B2C_CONTACT_CACHE_HOURS, 24, 1, 720);
     const cacheSince = new Date(Date.now() - cacheWindowHours * 3_600_000).toISOString();
-    const [knownPhoneRows, noPhoneRows] = await Promise.all([
+    const [knownPhoneRows, noPhoneRows, previouslyDeliveredRows] = await Promise.all([
       database("b2c_leads").select("author_id", "author_username", "phone").where({ organization_id: campaign.organization_id }).whereNotNull("phone"),
       database("b2c_candidates").select("author_id", "author_username", "post_id").where({ organization_id: campaign.organization_id }).whereIn("status", ["REJECTED_NO_PHONE", "REJECTED_CACHED_NO_PHONE"]).where("updated_at", ">", cacheSince),
+      database("b2c_leads").select("author_id", "author_username", "phone").where({ organization_id: campaign.organization_id }).whereNot({ campaign_id: campaign.id }),
     ]);
     const phoneCache = new Map();
     for (const row of knownPhoneRows) {
@@ -1229,12 +1664,28 @@ export async function runB2CCampaign({ database, env, campaignId, logger }) {
       : row.author_username
         ? `username:${normalizeText(row.author_username)}`
         : `post:${row.post_id}`));
+    const previouslyDeliveredSellers = new Set();
+    const previouslyDeliveredPhones = new Set();
+    for (const row of previouslyDeliveredRows) {
+      if (row.author_id != null) previouslyDeliveredSellers.add(`author:${row.author_id}`);
+      if (row.author_username) previouslyDeliveredSellers.add(`username:${normalizeText(row.author_username)}`);
+      const phone = normalizeSaudiPhone(row.phone);
+      if (phone) previouslyDeliveredPhones.add(phone);
+    }
     const earlyStopSample = numeric(env.B2C_NO_PHONE_EARLY_STOP_SAMPLE, 30, 10, 100);
 
     for (const { key, candidate, qualification } of uniqueCandidates) {
       if (stats.uniqueLeads >= Number(campaign.target_lead_count)) break;
       stats.contactCandidatesProcessed += 1;
       const candidateKey = `${campaign.id}:${candidate.postId}:${candidate.matchedStrategy.tagName}`;
+      if (previouslyDeliveredSellers.has(key)) {
+        await database("b2c_candidates").where({ candidate_key: candidateKey }).update({
+          status: "REJECTED_ALREADY_DELIVERED",
+          qualification: dbJson({ ...qualification, isQualified: false, rejectionReasons: [...new Set([...(qualification.rejectionReasons || []), "This person was already delivered to the organization in an earlier campaign"]) ] }),
+          updated_at: new Date().toISOString(),
+        });
+        continue;
+      }
       let resolvedPhone = phoneCache.get(key) || normalizeSaudiPhone(`${candidate.title} ${candidate.bodyText}`.match(/(?:\+?966|0)?5\d{8}/)?.[0]);
       let contact = resolvedPhone ? { contactMobile: resolvedPhone } : null;
       if (phoneCache.has(key)) stats.cachedContactHits += 1;
@@ -1255,6 +1706,10 @@ export async function runB2CCampaign({ database, env, campaignId, logger }) {
           resolvedPhone = normalizeSaudiPhone(contact?.contactMobile || String(contact?.contactText || "").match(/(?:\+?966|0)?5\d{8}/)?.[0]);
         } catch (error) {
           logger?.warn?.(`Haraj contact lookup failed for post ${candidate.postId}: ${String(error?.message || error)}`);
+          const status = Number(error?.status || 0) || null;
+          stats.contactErrors = Number(stats.contactErrors || 0) + 1;
+          if (status === 401 || status === 403) stats.contactAuthentication = "rejected";
+          appendExecutionEvent(stats, "CONTACT_LOOKUP_FAILED", { postId: candidate.postId, status, retryable: status === 429 || !status || status >= 500 });
           contact = {};
         }
       }
@@ -1272,6 +1727,14 @@ export async function runB2CCampaign({ database, env, campaignId, logger }) {
         }
         continue;
       }
+      if (previouslyDeliveredPhones.has(resolvedPhone)) {
+        await database("b2c_candidates").where({ candidate_key: candidateKey }).update({
+          status: "REJECTED_ALREADY_DELIVERED",
+          qualification: dbJson({ ...qualification, isQualified: false, rejectionReasons: [...new Set([...(qualification.rejectionReasons || []), "This verified phone was already delivered to the organization in an earlier campaign"]) ] }),
+          updated_at: new Date().toISOString(),
+        });
+        continue;
+      }
       stats.contactsResolved += 1;
       phoneCache.set(key, resolvedPhone);
       contact = { ...(contact || {}), contactMobile: resolvedPhone };
@@ -1283,24 +1746,51 @@ export async function runB2CCampaign({ database, env, campaignId, logger }) {
       stats.warmLeads = Number(aggregate.find((row) => row.tier === "WARM")?.count || 0);
       await updateCampaign(database, campaign.id, "RUNNING", stats);
       await database("lead_requests").where({ id: campaign.request_id }).update({ result_count: stats.uniqueLeads, updated_at: new Date().toISOString() });
+      stats.exactCountContract = { requested: Number(campaign.target_lead_count), delivered: stats.uniqueLeads, remaining: Math.max(0, Number(campaign.target_lead_count) - stats.uniqueLeads) };
+      appendExecutionEvent(stats, "LEAD_DELIVERED", { delivered: stats.uniqueLeads, requested: Number(campaign.target_lead_count) });
+    }
+    if (stats.uniqueLeads < Number(campaign.target_lead_count) && !stats.searchFallbackActivated && strategies.some((strategy) => strategy.phase === "fallback")) {
+      stats.searchFallbackActivated = true;
+      stats.fallbackActivatedAt = new Date().toISOString();
     }
     const shouldContinue = stats.uniqueLeads < Number(campaign.target_lead_count)
       && !stats.sourceExhausted
-      && stats.postsFetched < maxAds
-      && maxPages > 0;
+      && !(maxAds > 0 && stats.postsFetched >= maxAds);
     if (shouldContinue) {
+      appendExecutionEvent(stats, "NEXT_PASS_QUEUED", { delivered: stats.uniqueLeads, remaining: Number(campaign.target_lead_count) - stats.uniqueLeads });
       await database("lead_requests").where({ id: campaign.request_id }).update({ status: "sourcing", result_count: stats.uniqueLeads, error_message: null, updated_at: new Date().toISOString() });
       await updateCampaign(database, campaign.id, "QUEUED", stats, null);
       setTimeout(() => runB2CCampaign({ database, env, campaignId: campaign.id, logger }).catch(() => undefined), 250);
       return stats;
     }
-    const finalStatus = stats.uniqueLeads >= Number(campaign.target_lead_count) ? "COMPLETED" : stats.uniqueLeads > 0 ? "PARTIAL" : "FAILED";
+    if (stats.uniqueLeads < Number(campaign.target_lead_count) && stats.sourceExhausted && !(maxAds > 0 && stats.postsFetched >= maxAds)) {
+      const maxRecoveryRounds = numeric(env.B2C_MAX_RECOVERY_ROUNDS, 6, 0, 20);
+      if (stats.recoveryRound < maxRecoveryRounds) {
+        const recoveryRound = stats.recoveryRound + 1;
+        const recoveryStrategies = await createRecoveryStrategies(env, campaign, plan, recoveryRound);
+        if (recoveryStrategies.length) {
+          const updatedPlan = { ...plan, strategies: [...strategies, ...recoveryStrategies], recovery: { enabled: true, round: recoveryRound, maxRounds: maxRecoveryRounds, lastExpandedAt: new Date().toISOString() } };
+          stats.recoveryRound = recoveryRound;
+          stats.sourceExhausted = false;
+          stats.exactCountContract = { requested: Number(campaign.target_lead_count), delivered: stats.uniqueLeads, remaining: Number(campaign.target_lead_count) - stats.uniqueLeads };
+          appendExecutionEvent(stats, "RECOVERY_PATHS_ADDED", { round: recoveryRound, paths: recoveryStrategies.map((strategy) => strategy.tagName), remaining: stats.exactCountContract.remaining });
+          await database("b2c_campaigns").where({ id: campaign.id }).update({ acquisition_plan: dbJson(updatedPlan), updated_at: new Date().toISOString() });
+          await database("lead_requests").where({ id: campaign.request_id }).update({ status: "sourcing", result_count: stats.uniqueLeads, error_message: null, updated_at: new Date().toISOString() });
+          await updateCampaign(database, campaign.id, "QUEUED", stats, null);
+          setTimeout(() => runB2CCampaign({ database, env, campaignId: campaign.id, logger }).catch(() => undefined), 250);
+          return stats;
+        }
+        appendExecutionEvent(stats, "RECOVERY_PATH_GENERATION_EMPTY", { round: recoveryRound });
+      }
+    }
+    const finalStatus = stats.uniqueLeads >= Number(campaign.target_lead_count) ? "COMPLETED" : "FAILED";
     const requestStatus = finalStatus === "COMPLETED" ? "sourced" : finalStatus.toLowerCase();
     const finalMessage = finalStatus === "FAILED"
-      ? stats.stoppedEarly
-        ? stats.earlyStopReason
-        : "Wasla could not validate any matching B2C prospects from this search."
+      ? stats.contactAuthentication === "rejected"
+        ? "Wasla could not finish contact verification. The secure sourcing connection must be refreshed before this run can continue."
+        : `Wasla exhausted every approved and recovery path after delivering ${stats.uniqueLeads} of ${Number(campaign.target_lead_count)} requested leads.`
       : null;
+    appendExecutionEvent(stats, finalStatus === "COMPLETED" ? "EXACT_TARGET_REACHED" : "TERMINAL_SHORTFALL", { delivered: stats.uniqueLeads, requested: Number(campaign.target_lead_count), sourceExhausted: stats.sourceExhausted, maxAdsReached: maxAds > 0 && stats.postsFetched >= maxAds });
     await database("lead_requests").where({ id: campaign.request_id }).update({ status: requestStatus, result_count: stats.uniqueLeads, error_message: finalMessage, updated_at: new Date().toISOString() });
     await updateCampaign(database, campaign.id, finalStatus, stats, finalMessage);
     return stats;
