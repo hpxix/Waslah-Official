@@ -11259,3 +11259,147 @@ html.is-language-switching #root {
   #root .wasla-command__example>strong{margin:9px 0 11px;font-size:15px}
   #root .wasla-command__beam[data-beam]{width:calc(100% - 20px);margin:9px 10px 10px}
 }
+
+/* Mobile chat: open conversation canvas, raised composer, compact desktop nav. */
+@media (max-width: 680px) {
+  #root .ops-agent-page {
+    min-height: calc(100dvh - 74px);
+  }
+
+  #root .ops-agent-page__top {
+    min-height: 54px;
+    padding-inline: 8px;
+  }
+
+  #root .ops-chat-stage,
+  #root .hconsole.has-collapsed-sidebar .ops-chat-stage,
+  #root .ops-chat-stage.has-conversation {
+    height: calc(100dvh - 102px);
+    min-height: 0;
+    padding: 18px 10px 10px;
+  }
+
+  #root .ops-chat-stage.has-conversation .ops-chat-stage__intro {
+    margin-bottom: 22px;
+  }
+
+  #root .ops-chat-stage.has-conversation .ops-chat-stage__intro h1 {
+    color: #f1f2f3;
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  #root .ops-agent-page__conversation {
+    gap: 24px;
+    margin-bottom: 14px;
+    padding: 2px 4px 18px;
+  }
+
+  #root [dir] .ops-agent-page__conversation .ops-chat-message.is-assistant:not(.is-research) .ops-chat-message__content,
+  #root [dir] .ops-agent-page__conversation .ops-chat-message.is-user .ops-chat-message__content {
+    font-size: 15px;
+    line-height: 1.8;
+  }
+
+  #root .ops-chat-composer-beam[data-beam] {
+    flex: 0 0 auto;
+    margin: 0 auto 58px;
+    width: calc(100% - 4px);
+  }
+
+  #root .ops-chat-composer {
+    min-height: 54px;
+  }
+
+  #root .ops-chat-composer .liquid-metal-submit {
+    height: 52px;
+    min-height: 52px;
+    width: 52px;
+  }
+
+  #root .wasla-nav-capsule.is-console,
+  #root .wasla-nav-capsule.is-bottom.is-console,
+  #root [dir="rtl"] .wasla-nav-capsule.is-console,
+  #root [dir="rtl"] .wasla-nav-capsule.is-bottom.is-console {
+    bottom: 8px;
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: min(390px, calc(100vw - 16px));
+  }
+
+  #root .wasla-nav-capsule.is-bottom.is-console .wasla-nav-capsule__bar {
+    display: grid;
+    gap: 3px;
+    grid-template-columns: 36px minmax(0, 1fr) 62px 52px;
+    grid-template-rows: 38px;
+    min-height: 42px;
+    padding: 2px 5px 2px 2px;
+    width: 100%;
+  }
+
+  #root [dir="rtl"] .wasla-nav-capsule.is-bottom.is-console .wasla-nav-capsule__bar {
+    padding: 2px 2px 2px 5px;
+  }
+
+  #root .wasla-nav-capsule.is-console .wasla-nav-capsule__trigger,
+  #root .wasla-nav-capsule.is-bottom.is-console .wasla-nav-capsule__trigger {
+    display: flex;
+    height: 34px;
+    width: 34px;
+  }
+
+  #root .wasla-nav-capsule.is-console .wasla-nav-capsule__essentials {
+    display: flex !important;
+    min-width: 0;
+  }
+
+  #root .wasla-nav-capsule.is-console .wasla-nav-capsule__essentials button {
+    flex: 1 1 0;
+    font-size: 8px;
+    min-height: 28px;
+    min-width: 0;
+    padding: 0 3px;
+  }
+
+  #root .wasla-nav-capsule.is-console .wasla-nav-capsule__essentials button span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #root .wasla-nav-capsule.is-console .wasla-nav-capsule__bar > .language-toggle {
+    display: grid !important;
+    height: 28px;
+    min-height: 28px;
+    min-width: 0;
+    width: 62px;
+  }
+
+  #root .wasla-nav-capsule.is-console .wasla-nav-capsule__brand {
+    align-items: center;
+    display: flex !important;
+    min-width: 0;
+  }
+
+  #root .wasla-nav-capsule.is-console .wasla-nav-capsule__brand .wasla-brand--horizontal {
+    height: 18px;
+    width: 49px;
+  }
+
+  #root .wasla-nav-capsule.is-console .wasla-nav-capsule__sheet {
+    bottom: calc(100% + 10px);
+    max-height: calc(100dvh - 78px);
+    width: 100%;
+  }
+}
+
+@media (max-width: 390px) {
+  #root .wasla-nav-capsule.is-bottom.is-console .wasla-nav-capsule__bar {
+    grid-template-columns: 34px minmax(0, 1fr) 58px 46px;
+  }
+
+  #root .wasla-nav-capsule.is-console .wasla-nav-capsule__essentials button {
+    font-size: 7px;
+  }
+}

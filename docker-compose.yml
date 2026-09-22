@@ -1,7 +1,7 @@
 services:
   frontend:
     build:
-      context: ../waslah-frontend Green
+      context: .
       args:
         VITE_DIRECTUS_URL: /directus
     image: waslah/frontend:local
