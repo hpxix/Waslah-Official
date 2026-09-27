@@ -871,6 +871,7 @@ function ConsoleShell({
       } else setLeadTypePickerOpen(availableLeadTypes.length > 1);
     }
     setActiveTab(tab);
+    setSidebarCollapsed(true);
     navigate("/console/" + tab);
   }
 
@@ -936,6 +937,7 @@ function ConsoleShell({
   }
 
   function focusWorkspaceSearch() {
+    setSidebarCollapsed(true);
     setLeadSearchQuery("");
     setLeadSearchOpen(true);
   }
@@ -1390,7 +1392,12 @@ function ConsoleShell({
                 </SidebarGroupLabel>
                 <SidebarMenu>
                   <SidebarMenuItem>
-                    <SidebarMenuButton onClick={() => setTourOpen(true)}>
+                    <SidebarMenuButton
+                      onClick={() => {
+                        setSidebarCollapsed(true);
+                        setTourOpen(true);
+                      }}
+                    >
                       <Sparkles size={16} />
                       <span>
                         {language === "ar"
@@ -1400,7 +1407,12 @@ function ConsoleShell({
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                   <SidebarMenuItem>
-                    <SidebarMenuButton onClick={() => setSettingsOpen(true)}>
+                    <SidebarMenuButton
+                      onClick={() => {
+                        setSidebarCollapsed(true);
+                        setSettingsOpen(true);
+                      }}
+                    >
                       <Settings size={16} />
                       <span>
                         {language === "ar" ? "الإعدادات" : "Settings"}
@@ -1452,7 +1464,10 @@ function ConsoleShell({
                     language === "ar" ? "إعدادات الحساب" : "Account settings"
                   }
                   data-tooltip={language === "ar" ? "الإعدادات" : "Settings"}
-                  onClick={() => setSettingsOpen(true)}
+                  onClick={() => {
+                    setSidebarCollapsed(true);
+                    setSettingsOpen(true);
+                  }}
                 >
                   <Settings size={15} />
                 </button>
