@@ -612,20 +612,48 @@ function ConsoleShell({
     creditCount(user?.freeCreditSar || 0),
     setLeads,
   );
+  const settledLeadShortfall = Boolean(
+    leadWorkspace.job &&
+      Number(leadWorkspace.job.result_count) > 0 &&
+      Number(leadWorkspace.job.result_count) <
+        Number(leadWorkspace.job.target_count) &&
+      (["failed", "error", "cancelled"].includes(
+        String(leadWorkspace.job.status).toLowerCase(),
+      ) ||
+        Boolean(leadWorkspace.job.b2cCampaign?.stats.sourceExhausted)),
+  );
   const lastLeadErrorToast = useRef("");
   useEffect(() => {
+    const toastIdentity = `${leadWorkspace.job?.id || "workspace"}:${leadWorkspace.error}`;
     if (
       !leadWorkspace.error ||
-      leadWorkspace.error === lastLeadErrorToast.current
+      toastIdentity === lastLeadErrorToast.current
     )
       return;
-    lastLeadErrorToast.current = leadWorkspace.error;
+    lastLeadErrorToast.current = toastIdentity;
+    if (settledLeadShortfall && leadWorkspace.job) {
+      const delivered = Number(leadWorkspace.job.result_count);
+      const noticeKey = `wasla:lead-shortfall-toast:${leadWorkspace.job.id}`;
+      if (window.localStorage.getItem(noticeKey)) return;
+      window.localStorage.setItem(noticeKey, "shown");
+      notify.success(
+        language === "ar" ? "اكتمل طلب العملاء!" : "Lead request completed!",
+        {
+          description:
+            language === "ar"
+              ? `وجدنا لك ${delivered} عميلاً فقط لضمان أفضل جودة ممكنة.`
+              : `We found ${delivered} leads for you to ensure the best possible quality.`,
+          timeout: 4500,
+        },
+      );
+      return;
+    }
     notify.danger(
       language === "ar"
         ? `تعذر إكمال البحث: ${leadWorkspace.error}`
         : `Lead search could not complete: ${leadWorkspace.error}`,
     );
-  }, [leadWorkspace.error, language]);
+  }, [leadWorkspace.error, leadWorkspace.job, settledLeadShortfall, language]);
   const generationLock = useRef(false);
   const [researchingLeadId, setResearchingLeadId] = useState<string | null>(
     null,
@@ -1766,7 +1794,7 @@ function ConsoleShell({
                     language={language}
                     job={leadWorkspace.job}
                     loading={leadWorkspace.loading}
-                    error={leadWorkspace.error}
+                    error={settledLeadShortfall ? "" : leadWorkspace.error}
                     focusedLeadId={focusedLeadId}
                     researchingLeadId={researchingLeadId}
                     onRefresh={leadWorkspace.refresh}
