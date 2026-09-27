@@ -2023,6 +2023,25 @@ html {
   height: 6px;
   width: 6px;
 }
+#root .ops-reasoning-badge {
+  align-items: center;
+  align-self: flex-start;
+  border: 1px solid #303438;
+  border-radius: 999px;
+  color: #a6adb1;
+  display: inline-flex;
+  font-size: 9px;
+  gap: 6px;
+  margin: -2px 0 12px;
+  padding: 4px 8px;
+}
+#root .ops-reasoning-badge.is-fast {
+  border-color: color-mix(in srgb, var(--primary) 42%, #303438);
+  color: var(--primary);
+}
+#root .ops-reasoning-badge.is-high {
+  color: #d8dcde;
+}
 #root .ops-chat-composer input:disabled {
   cursor: not-allowed;
   opacity: 0.5;

@@ -909,11 +909,11 @@ export type WaslaConversationResult =
   | { mode: "assistant"; text: string }
   | { mode: "lead"; intake: IntakeState; text: string };
 
-async function chatWithWasla(message: string, transcript: string[], language: "ar" | "en", conversationId?: string, leadType?: "b2c" | "b2b" | null, objective?: "buy" | "sell") {
-  return authenticatedRequest<{ text: string; intake?: IntakeState }>("post", `${leadAgentPath}/chat`, { message, transcript, language, conversation_id: conversationId, lead_type: leadType, deal_intent: objective });
+async function chatWithWasla(message: string, transcript: string[], language: "ar" | "en", conversationId?: string, leadType?: "b2c" | "b2b" | null, objective?: "buy" | "sell", reasoningMode: "fast" | "high" = "high") {
+  return authenticatedRequest<{ text: string; intake?: IntakeState }>("post", `${leadAgentPath}/chat`, { message, transcript, language, conversation_id: conversationId, lead_type: leadType, deal_intent: objective, reasoning_mode: reasoningMode });
 }
 
-async function chatWithB2CWasla(message: string, transcript: string[], language: "ar" | "en", conversationId?: string, objective?: "buy" | "sell", planning?: B2CPlanning) {
+async function chatWithB2CWasla(message: string, transcript: string[], language: "ar" | "en", conversationId?: string, objective?: "buy" | "sell", planning?: B2CPlanning, reasoningMode: "fast" | "high" = "high") {
   return authenticatedRequest<{ text: string; planning: B2CPlanning | null; ready: boolean; missing: string[]; brief: string; stage?: string }>("post", `${leadAgentPath}/b2c/chat`, {
     message,
     transcript,
@@ -921,6 +921,7 @@ async function chatWithB2CWasla(message: string, transcript: string[], language:
     conversation_id: conversationId,
     deal_intent: objective,
     planning,
+    reasoning_mode: reasoningMode,
   });
 }
 
@@ -932,11 +933,12 @@ export async function converseWithWasla(
   conversationId?: string,
   leadType?: "b2c" | "b2b" | null,
   currentPlanning?: B2CPlanning,
+  reasoningMode: "fast" | "high" = "high",
 ): Promise<WaslaConversationResult> {
   const leadRequest = leadType ? message.trim().length >= 3 : isLeadSearchRequest(message);
   if (leadRequest && leadType === "b2c") {
     try {
-      const response = await chatWithB2CWasla(message, transcript, language, conversationId, objective, currentPlanning);
+      const response = await chatWithB2CWasla(message, transcript, language, conversationId, objective, currentPlanning, reasoningMode);
       if (!response.ready || !response.planning) {
         return {
           mode: "lead",
@@ -983,7 +985,7 @@ export async function converseWithWasla(
     }
   }
   try {
-    const chat = await chatWithWasla(message, transcript, language, conversationId, leadType, objective);
+    const chat = await chatWithWasla(message, transcript, language, conversationId, leadType, objective, reasoningMode);
     const intake = chat.intake || (leadRequest ? await understandLeadAsk(message, transcript) : null);
     if (leadRequest && intake) return { mode: "lead", intake, text: chat.text };
     return { mode: "assistant", text: chat.text };

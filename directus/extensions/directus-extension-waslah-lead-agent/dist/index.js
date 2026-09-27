@@ -755,7 +755,7 @@ async function waslaBusinessContext(database, organization) {
   }
 }
 
-async function createWaslaChatResponse(env, message, transcript, language, leadType = null, dealIntent = null, businessContext = "") {
+async function createWaslaChatResponse(env, message, transcript, language, leadType = null, dealIntent = null, businessContext = "", reasoningMode = "high") {
   if (!env.OPENAI_API_KEY) throw new ApiError(503, "CHAT_NOT_CONFIGURED", "AI chat is not configured yet.");
   const ar = language === "ar";
   const history = transcript.slice(-16).map((entry) => {
@@ -770,6 +770,11 @@ async function createWaslaChatResponse(env, message, transcript, language, leadT
   if (!last || last.role !== "user" || last.content.trim() !== message.trim()) {
     history.push({ role: "user", content: message });
   }
+  const assistantQuestionCount = history.filter((item) => item.role === "assistant" && /[?؟]/.test(item.content)).length;
+  const fastFinalTurn = reasoningMode === "fast" && assistantQuestionCount >= 4;
+  const reasoningInstructions = reasoningMode === "fast"
+    ? `FAST PROMPTING 1.5X MODE: finish qualification in no more than five assistant questions total, preferably three. ${fastFinalTurn ? "The question limit is now reached. Do not ask another question. Infer sensible defaults from the user's answers and saved Business DNA, mark the brief ready when a viable search can be formed, and give a decisive cumulative summary." : `You have already asked ${assistantQuestionCount} question(s). Ask only the single highest-impact remaining question, or finish immediately when the brief is actionable.`}`
+    : "HIGH REASONING MODE: reason carefully through the business model, value chain, downstream buyers, purchase triggers, exclusions, and adjacent demand—the way a shovel seller identifies gold miners. Challenge weak assumptions and choose the strongest commercially defensible lead path before declaring the brief ready.";
 
   const missionMode = `${leadType || "not decided"}/${dealIntent || "not decided"}`;
   const missionMeaning = leadType === "b2c" && dealIntent === "buy"
@@ -786,6 +791,7 @@ async function createWaslaChatResponse(env, message, transcript, language, leadT
 Reply in ${ar ? "Arabic" : "English"} unless the user explicitly asks for another language. Sound like a thoughtful senior sales strategist and procurement adviser: warm, perceptive, specific, commercially aware, and genuinely conversational. Never sound like a form, decision tree, support bot, or canned script.
 
 Current mission mode: ${missionMode}. ${missionMeaning}
+Selected conversation mode: ${reasoningMode}. ${reasoningInstructions}
 
 Workspace Business DNA:
 ${businessContext || "No saved Business DNA is available yet."}
@@ -820,6 +826,7 @@ For lead qualification, collect only criteria that improve this specific mission
 
   const requestBody = JSON.stringify({
     model: env.OPENAI_CHAT_MODEL || "gpt-5.6-terra",
+    reasoning: { effort: reasoningMode === "high" ? "high" : "low" },
     instructions: instructions + (leadType === "b2b" ? "\nReturn JSON with text (your natural conversational answer), ready (boolean), summary (complete cumulative sourcing brief), missing (unanswered essential criteria only), and searchQueries (1-4 concise business-category + location searches). Preserve all user criteria across turns. Set ready when you know the target business category and geography and understand whether this is buying or selling. A named person or job title is optional for searches requesting business phone numbers. Do not let a brief already fully specified regress because the latest message is 'go ahead'. If ready, direct the user to the in-chat quantity choices. Never invent missing details. SearchQueries describe the target businesses, not the product the user sells." : ""),
     ...(leadType === "b2b" ? { text: { format: { type: "json_schema", name: "lead_brief", strict: true, schema: {
       type: "object", additionalProperties: false, required: ["text", "ready", "summary", "missing", "searchQueries"],
@@ -1636,14 +1643,22 @@ export default {
       const conversationId = req.body?.conversation_id || req.body?.conversationId;
       const leadType = ["b2b", "b2c"].includes(req.body?.lead_type) ? req.body.lead_type : null;
       const dealIntent = ["buy", "sell"].includes(req.body?.deal_intent) ? req.body.deal_intent : null;
+      const reasoningMode = req.body?.reasoning_mode === "fast" ? "fast" : "high";
       if (leadType === "b2b") await assertFeature(database, context, "lead_agent_b2b");
       if (leadType === "b2c") await assertFeature(database, context, "lead_agent_b2c");
       if (!message) throw new ApiError(400, "CHAT_MESSAGE_REQUIRED", "Write a message first.");
       if (message.length > 4000) throw new ApiError(400, "CHAT_MESSAGE_TOO_LONG", "Keep messages under 4,000 characters.");
       try {
         const businessContext = await waslaBusinessContext(database, context.organization);
-        const output = await createWaslaChatResponse(env, message, transcript, language, leadType, dealIntent, businessContext);
+        const output = await createWaslaChatResponse(env, message, transcript, language, leadType, dealIntent, businessContext, reasoningMode);
         const brief = leadType === "b2b" ? JSON.parse(output) : null;
+        if (brief && reasoningMode === "fast" && transcript.filter((entry) => /^assistant\s*:/i.test(String(entry)) && /[?؟]/.test(String(entry))).length >= 4) {
+          brief.ready = Boolean(brief.searchQueries?.length);
+          brief.missing = brief.ready ? [] : brief.missing;
+          if (brief.ready && /[?؟]\s*$/.test(String(brief.text || ""))) {
+            brief.text = String(brief.text).replace(/(?:^|\n)[^\n?؟]*[?؟]\s*$/, "").trim();
+          }
+        }
         const text = brief?.text || output;
         const intake = brief ? {
           confidence: brief.ready && brief.searchQueries?.length ? 100 : 50,
@@ -1670,6 +1685,7 @@ export default {
       const clientTranscript = Array.isArray(req.body?.transcript) ? req.body.transcript : [];
       const conversationId = req.body?.conversation_id || req.body?.conversationId;
       const dealIntent = req.body?.deal_intent === "buy" ? "buy" : "sell";
+      const reasoningMode = req.body?.reasoning_mode === "fast" ? "fast" : "high";
       const suppliedPlanning = req.body?.planning;
       if (prompt.length < 3) throw new ApiError(400, "B2C_PROMPT_REQUIRED", "Describe the product or service you want to sell.");
       if (prompt.length > 4000) throw new ApiError(400, "B2C_PROMPT_TOO_LONG", "Keep the request under 4,000 characters.");
@@ -1688,7 +1704,7 @@ export default {
         res.json({ data: { text, planning, ready: true, missing: [], brief: planning.intent.productDescription, stage: "ready_for_quantity" } });
         return;
       }
-      const discovery = await createB2CDiscoveryTurn(env, { message: prompt, transcript, language, dealIntent, businessContext });
+      const discovery = await createB2CDiscoveryTurn(env, { message: prompt, transcript, language, dealIntent, businessContext, reasoningMode });
       if (!discovery.ready) {
         await createChatLog(database, context, { conversationId, mode: "b2c", language, leadType: "b2c", dealIntent, message: prompt, response: discovery.reply, transcript, understoodData: discovery, outcome: "discovery", status: "qualifying" }).catch((error) => logger.error(error));
         await rememberConversation(database, context, { conversationId, leadType: "b2c", dealIntent, message: prompt, summary: discovery.summary, missing: discovery.missing, knownFacts: discovery.knownFacts, answeredTopics: discovery.answeredTopics, confidence: discovery.confidence, outcome: "discovery" }).catch((error) => logger.error(error));
@@ -1715,7 +1731,7 @@ export default {
       const synthesisContext = language === "ar"
         ? `معلومة داخلية للرد التالي: اكتملت المعايير. المنتج أو الطلب: ${intent.productName}. الملفات المستهدفة: ${profiles}. الإشارات: ${signals}. الموقع: ${locations}. لخّص فهمك بذكاء وبأسلوب طبيعي، اذكر أي افتراض مهم، ثم اطلب من المستخدم كتابة «ابدأ» فقط إذا كان الوصف دقيقاً.`
         : `Internal context for the next reply: the brief is complete. Product or request: ${intent.productName}. Target profiles: ${profiles}. Signals: ${signals}. Geography: ${locations}. Synthesize your understanding thoughtfully and naturally, state any important assumption, then ask the user to reply “start” only if the description is accurate.`;
-      const text = await createWaslaChatResponse(env, prompt, [...transcript, `user: ${synthesisContext}`], language, "b2c", dealIntent, businessContext).catch(() => fallbackText);
+      const text = await createWaslaChatResponse(env, prompt, [...transcript, `user: ${synthesisContext}`], language, "b2c", dealIntent, businessContext, reasoningMode).catch(() => fallbackText);
       await createChatLog(database, context, { conversationId, mode: "b2c", language, leadType: "b2c", dealIntent, message: prompt, response: text, transcript, understoodData: planning, outcome: "ready_for_quantity", status: "completed" }).catch((error) => logger.error(error));
       await rememberConversation(database, context, { conversationId, leadType: "b2c", dealIntent, message: prompt, summary: discovery.summary, missing: [], knownFacts: discovery.knownFacts, answeredTopics: discovery.answeredTopics, b2cIntent: planning.intent, acquisitionPlan: planning.acquisitionPlan, confidence: 100, outcome: "ready_for_quantity" }).catch((error) => logger.error(error));
       res.json({ data: { text, planning, ready: true, missing: [], brief: discovery.summary } });

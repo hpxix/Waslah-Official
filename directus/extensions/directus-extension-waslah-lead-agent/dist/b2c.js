@@ -195,7 +195,7 @@ function responseText(payload) {
   return "";
 }
 
-async function structuredResponse(env, name, schema, instructions, input, maxOutputTokens = 2200) {
+async function structuredResponse(env, name, schema, instructions, input, maxOutputTokens = 2200, reasoningEffort = "low") {
   if (!env.OPENAI_API_KEY) return null;
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -205,7 +205,7 @@ async function structuredResponse(env, name, schema, instructions, input, maxOut
       instructions,
       input: JSON.stringify(input),
       text: { format: { type: "json_schema", name, strict: true, schema } },
-      reasoning: { effort: "low" },
+      reasoning: { effort: reasoningEffort },
       max_output_tokens: maxOutputTokens,
       store: false,
     }),
@@ -493,7 +493,7 @@ function uncertainReply(text) {
   return /\b(?:idk|i don'?t know|not sure|no idea|wdym|what do you mean|lol|you (?:choose|tell me|recommend)|recommend for me)\b|ما ادري|مادري|لا اعرف|مو متأكد|وش تقصد|انت اختر|اقترح/i.test(String(text || ""));
 }
 
-export async function createB2CDiscoveryTurn(env, { message, transcript = [], language = "ar", dealIntent = "sell", businessContext = null } = {}) {
+export async function createB2CDiscoveryTurn(env, { message, transcript = [], language = "ar", dealIntent = "sell", businessContext = null, reasoningMode = "high" } = {}) {
   const cleanTranscript = (Array.isArray(transcript) ? transcript : []).map(String)
     .filter((line) => !/^\s*(?:user|assistant)?\s*(?:mission|business|user) context\s*:/i.test(line)).slice(-80);
   const currentMessage = normalizeText(message);
@@ -511,11 +511,16 @@ export async function createB2CDiscoveryTurn(env, { message, transcript = [], la
   const fallbackReply = language === "ar"
     ? `عادي—مو لازم تعرف التصنيفات. بناءً على عرضك، أقترح أن نبحث عن أشخاص تظهر لديهم احتياجات مرتبطة بـ ${fallbackTags.map((tag) => tag.name).join("، ")} مع استبعاد المنافسين. أي اتجاه أقرب لعميلك، أم تريدني أختار الأنسب؟`
     : `That’s okay—you do not need to know the underlying categories. Based on your offer, I suggest looking for people showing needs related to ${fallbackTags.map((tag) => tag.name).join(", ")} while excluding competitors. Which direction is closest to your customer, or should I choose the best fit?`;
+  const assistantQuestionCount = cleanTranscript.filter((line) => /^assistant\s*:/i.test(line) && /[?؟]/.test(line)).length;
+  const fastFinalTurn = reasoningMode === "fast" && assistantQuestionCount >= 4;
+  const modeInstructions = reasoningMode === "fast"
+    ? `FAST PROMPTING 1.5X MODE: finish qualification in no more than five assistant questions total, preferably three. ${fastFinalTurn ? "The question limit is now reached. Do not ask another question. Infer sensible defaults from the business context, set ready=true, leave missing empty, and produce a decisive cumulative brief." : `You have already asked ${assistantQuestionCount} qualification question(s). Ask only the single highest-impact remaining question, or set ready=true immediately if the brief is actionable.`}`
+    : "HIGH REASONING MODE: reason through the business model, value chain, downstream buyers, purchase triggers, and adjacent demand—the way a shovel seller identifies gold miners. Challenge weak audience assumptions and synthesize the strongest lead path before declaring the brief ready.";
   let result = null;
   try {
     result = await structuredResponse(env, "waslah_b2c_discovery", discoverySchema,
-      `You are Wasla's premium conversational growth strategist. Keep discovery concise and commercially useful. Learn only what materially improves this lead campaign: the exact offer and its variants, who could realistically buy it, geography, important exclusions, package price or campaign budget when relevant, capacity, timing, and success criteria. Never ask how many customers the user already has, whether they have a customer or lead list, whether they want to retarget existing customers, or request their customer data—the user is here to find new leads. Usually reach an actionable brief within four to six strong questions; do not prolong discovery for optional details. Be curious, commercially sharp, and natural—not a form, checklist, card picker, or technical planning screen. The conversation and memory context are authoritative: extract a cumulative knownFacts ledger, mark answeredTopics, and never ask for any fact already present there, even if it appeared many turns ago or before a page refresh. Before writing the next question, explicitly compare it against every earlier assistant question and every answered topic; choose a genuinely new, highest-value topic. Ask one thoughtful question per turn, using specific audience examples when helpful. Format longer replies for scanning: use a short opening sentence, then concise Markdown bullet points with one idea per bullet, and place the next question on its own final line. Never return a dense single-line paragraph containing several different ideas. Do not force bullets for a simple one-sentence question. Never mention or imply any platform, marketplace, API, data provider, category database, scraping method, tag ID, schema, path, or internal sourcing implementation. Speak only as Wasla. Infer accepted and rejected audience directions from ordinary answers and place accepted internal category IDs in confirmedTagIds. If the user is unsure, make a concrete recommendation, record the topic as answered by delegation, and advance instead of repeating or rephrasing the same question. Do not automatically exclude sellers or owners of closely related products when they could themselves be plausible customers; exclude only direct competitors and clearly irrelevant suppliers. Do not mark ready merely because you recommended categories: mark ready when the offer, geography, important constraints, and a useful audience direction are understood, or the customer explicitly delegates remaining choices. Reply in ${language === "ar" ? "Arabic" : "English"}. Return only the schema.`,
-      { latest_message: message, conversation: cleanTranscript, deal_intent: dealIntent, business_context: businessContext, audience_signal_candidates: candidates.map((tag) => ({ id: tag.id, name: tag.name, aliases: tag.names })) }, 1800);
+      `You are Wasla's premium conversational growth strategist. ${modeInstructions} Keep discovery concise and commercially useful. Learn only what materially improves this lead campaign: the exact offer and its variants, who could realistically buy it, geography, important exclusions, package price or campaign budget when relevant, capacity, timing, and success criteria. Never ask how many customers the user already has, whether they have a customer or lead list, whether they want to retarget existing customers, or request their customer data—the user is here to find new leads. Be curious, commercially sharp, and natural—not a form, checklist, card picker, or technical planning screen. The conversation and memory context are authoritative: extract a cumulative knownFacts ledger, mark answeredTopics, and never ask for any fact already present there, even if it appeared many turns ago or before a page refresh. Before writing the next question, explicitly compare it against every earlier assistant question and every answered topic; choose a genuinely new, highest-value topic. Ask one thoughtful question per turn, using specific audience examples when helpful. Format longer replies for scanning: use a short opening sentence, then concise Markdown bullet points with one idea per bullet, and place the next question on its own final line. Never return a dense single-line paragraph containing several different ideas. Do not force bullets for a simple one-sentence question. Never mention or imply any platform, marketplace, API, data provider, category database, scraping method, tag ID, schema, path, or internal sourcing implementation. Speak only as Wasla. Infer accepted and rejected audience directions from ordinary answers and place accepted internal category IDs in confirmedTagIds. If the user is unsure, make a concrete recommendation, record the topic as answered by delegation, and advance instead of repeating or rephrasing the same question. Do not automatically exclude sellers or owners of closely related products when they could themselves be plausible customers; exclude only direct competitors and clearly irrelevant suppliers. Do not mark ready merely because you recommended categories: mark ready when the offer, geography, important constraints, and a useful audience direction are understood, or the customer explicitly delegates remaining choices. Reply in ${language === "ar" ? "Arabic" : "English"}. Return only the schema.`,
+      { latest_message: message, conversation: cleanTranscript, deal_intent: dealIntent, business_context: businessContext, audience_signal_candidates: candidates.map((tag) => ({ id: tag.id, name: tag.name, aliases: tag.names })) }, 1800, reasoningMode === "high" ? "high" : "low");
   } catch { result = null; }
   const validIds = (values) => [...new Set((Array.isArray(values) ? values : []).map(String).filter((id) => byId.has(id)))].slice(0, 6);
   if (!result) {
@@ -534,9 +539,15 @@ export async function createB2CDiscoveryTurn(env, { message, transcript = [], la
       ? ` بقي احتمال مرتبط: هل منشورات ${unexploredTagNames.join(" أو ")} قد تدل أيضاً على عميل مناسب لك؟`
       : ` One related possibility remains: could posts in ${unexploredTagNames.join(" or ")} also signal a useful customer for you?`;
   }
+  if (fastFinalTurn && /[?؟]\s*$/.test(reply)) {
+    reply = reply.replace(/(?:^|\n)[^\n?؟]*[?؟]\s*$/, "").trim();
+    if (!reply) reply = language === "ar" ? "اكتملت الصورة. سأستخدم أفضل الافتراضات التجارية من إجاباتك وأجهز مسار العملاء الآن." : "The brief is clear. I’ll use the strongest commercial assumptions from your answers and prepare the lead path now.";
+  }
   const hasDiscoveryExchange = cleanTranscript.some((line) => /^assistant\s*:/i.test(line));
   const asksAnotherQuestion = /[?؟]\s*$/.test(reply);
-  return { reply, ready: Boolean(result.ready) && !asksAnotherQuestion && (delegated || (hasDiscoveryExchange && confirmedTagIds.length > 0)) && (!uncertainReply(message) || delegated), summary: String(result.summary || conversationText).slice(0, 2000), missing: (Array.isArray(result.missing) ? result.missing : []).map(String).slice(0, 5), knownFacts: (Array.isArray(result.knownFacts) ? result.knownFacts : []).map(String).slice(0, 30), answeredTopics: (Array.isArray(result.answeredTopics) ? result.answeredTopics : []).map(String).slice(0, 20), recommendedTagIds, confirmedTagIds, confidence: numeric(Number(result.confidence) > 0 && Number(result.confidence) <= 1 ? Number(result.confidence) * 100 : result.confidence, 55) };
+  const fastConfirmedTagIds = fastFinalTurn && !confirmedTagIds.length ? (recommendedTagIds.length ? recommendedTagIds : fallbackTags.map((tag) => tag.id)) : confirmedTagIds;
+  const ready = (Boolean(result.ready) || fastFinalTurn) && !asksAnotherQuestion && (fastFinalTurn || delegated || (hasDiscoveryExchange && fastConfirmedTagIds.length > 0)) && (fastFinalTurn || !uncertainReply(message) || delegated);
+  return { reply, ready, summary: String(result.summary || conversationText).slice(0, 2000), missing: fastFinalTurn ? [] : (Array.isArray(result.missing) ? result.missing : []).map(String).slice(0, 5), knownFacts: (Array.isArray(result.knownFacts) ? result.knownFacts : []).map(String).slice(0, 30), answeredTopics: (Array.isArray(result.answeredTopics) ? result.answeredTopics : []).map(String).slice(0, 20), recommendedTagIds, confirmedTagIds: fastConfirmedTagIds, confidence: fastFinalTurn ? Math.max(78, numeric(result.confidence, 55)) : numeric(Number(result.confidence) > 0 && Number(result.confidence) <= 1 ? Number(result.confidence) * 100 : result.confidence, 55) };
 }
 
 const OPPORTUNITY_TAG_NAMES = [

@@ -163,6 +163,7 @@ function scanFriendlyAssistantText(text: string) {
 
 type DealIntent = "buy" | "sell";
 type LeadTypeChoice = "b2c" | "b2b" | "unsure";
+type ChatReasoningMode = "fast" | "high";
 type AvatarPreference = { color: string; showInitial: boolean };
 
 const avatarGradients: Record<string, string> = {
@@ -193,6 +194,7 @@ type ChatThread = {
   intake: IntakeState;
   intent?: DealIntent | null;
   leadType?: "b2c" | "b2b" | null;
+  reasoningMode?: ChatReasoningMode | null;
   showLeadOptions?: boolean;
 };
 
@@ -683,8 +685,15 @@ function ConsoleShell({
   const [leadCountPickerOpen, setLeadCountPickerOpen] = useState(
     restoredChat?.showLeadOptions ?? restoredChat?.intake?.confidence === 100,
   );
-  const [leadTypePickerOpen, setLeadTypePickerOpen] = useState(
+  const [chatReasoningMode, setChatReasoningMode] =
+    useState<ChatReasoningMode | null>(
+      restoredChat ? (restoredChat.reasoningMode ?? "high") : null,
+    );
+  const [reasoningModePickerOpen, setReasoningModePickerOpen] = useState(
     !restoredChat && initialTab === "agent",
+  );
+  const [leadTypePickerOpen, setLeadTypePickerOpen] = useState(
+    false,
   );
   const [dealDirectionPickerOpen, setDealDirectionPickerOpen] = useState(false);
   const [selectedLeadType, setSelectedLeadType] = useState<
@@ -862,9 +871,13 @@ function ConsoleShell({
       tab === "agent" &&
       !dealIntent &&
       !consoleMessages.length &&
-      !dealDirectionPickerOpen
+      !dealDirectionPickerOpen &&
+      !reasoningModePickerOpen
     ) {
-      if (availableLeadTypes.length === 1) {
+      if (!chatReasoningMode) {
+        setReasoningModePickerOpen(true);
+        setLeadTypePickerOpen(false);
+      } else if (availableLeadTypes.length === 1) {
         setSelectedLeadType(availableLeadTypes[0]);
         setLeadTypePickerOpen(false);
         setDealDirectionPickerOpen(true);
@@ -881,8 +894,10 @@ function ConsoleShell({
     setChatInput("");
     setConsoleMessages([]);
     setDealIntent(null);
-    setLeadTypePickerOpen(availableLeadTypes.length > 1);
-    setDealDirectionPickerOpen(availableLeadTypes.length === 1);
+    setChatReasoningMode(null);
+    setReasoningModePickerOpen(true);
+    setLeadTypePickerOpen(false);
+    setDealDirectionPickerOpen(false);
     setLeadCountPickerOpen(false);
     setSelectedLeadType(
       availableLeadTypes.length === 1 ? availableLeadTypes[0] : null,
@@ -923,6 +938,8 @@ function ConsoleShell({
     setConsoleMessages(thread.messages);
     setIntake(thread.intake);
     setDealIntent(savedChatIntent(thread));
+    setChatReasoningMode(thread.reasoningMode ?? "high");
+    setReasoningModePickerOpen(false);
     setSelectedLeadType(thread.leadType ?? thread.intake.channel ?? null);
     setLeadTypePickerOpen(false);
     setDealDirectionPickerOpen(false);
@@ -972,6 +989,7 @@ function ConsoleShell({
       intake,
       intent: dealIntent,
       leadType: selectedLeadType,
+      reasoningMode: chatReasoningMode,
       showLeadOptions: leadCountPickerOpen,
     };
     window.localStorage.setItem(`wasla:active-chat:${user.id}`, activeChatId);
@@ -991,6 +1009,7 @@ function ConsoleShell({
     activeChatTitle,
     consoleMessages,
     dealIntent,
+    chatReasoningMode,
     intake,
     selectedLeadType,
     leadCountPickerOpen,
@@ -1024,6 +1043,15 @@ function ConsoleShell({
 
   async function sendConsoleMessage(text = chatInput) {
     if (!text.trim() || busy) return;
+    if (!chatReasoningMode) {
+      setReasoningModePickerOpen(true);
+      notify.info(
+        language === "ar"
+          ? "اختر سرعة المحادثة أولاً."
+          : "Choose a conversation mode first.",
+      );
+      return;
+    }
     if (!dealIntent) {
       notify.info(
         language === "ar"
@@ -1096,6 +1124,7 @@ function ConsoleShell({
         activeChatId,
         effectiveLeadType,
         intake.b2cPlanning,
+        chatReasoningMode,
       ),
       new Promise((resolve) => window.setTimeout(resolve, 420)),
     ]);
@@ -1635,8 +1664,10 @@ function ConsoleShell({
                   language={language}
                   availableCredits={leadWorkspace.credits}
                   leadCountPickerOpen={leadCountPickerOpen}
+                  reasoningModePickerOpen={reasoningModePickerOpen}
                   leadTypePickerOpen={leadTypePickerOpen}
                   dealDirectionPickerOpen={dealDirectionPickerOpen}
+                  reasoningMode={chatReasoningMode}
                   selectedLeadType={selectedLeadType}
                   availableLeadTypes={availableLeadTypes}
                   onInputChange={setChatInput}
@@ -1649,6 +1680,17 @@ function ConsoleShell({
                     )
                   }
                   onLeadCountPickerChange={setLeadCountPickerOpen}
+                  onReasoningModeSelect={(mode) => {
+                    setChatReasoningMode(mode);
+                    setReasoningModePickerOpen(false);
+                    if (availableLeadTypes.length === 1) {
+                      setSelectedLeadType(availableLeadTypes[0]);
+                      setLeadTypePickerOpen(false);
+                      setDealDirectionPickerOpen(true);
+                    } else {
+                      setLeadTypePickerOpen(true);
+                    }
+                  }}
                   onLeadTypeSelect={(leadType) => {
                     setSelectedLeadType(
                       leadType === "unsure" ? null : leadType,
@@ -2252,13 +2294,16 @@ function AgentMissionPage({
   intent,
   language,
   leadCountPickerOpen,
+  reasoningModePickerOpen,
   leadTypePickerOpen,
   dealDirectionPickerOpen,
+  reasoningMode,
   selectedLeadType,
   availableLeadTypes,
   onInputChange,
   onRun,
   onLeadCountPickerChange,
+  onReasoningModeSelect,
   onLeadTypeSelect,
   onDirectionSelect,
   onInsufficientCredits,
@@ -2275,13 +2320,16 @@ function AgentMissionPage({
   intent: DealIntent | null;
   language: "ar" | "en";
   leadCountPickerOpen: boolean;
+  reasoningModePickerOpen: boolean;
   leadTypePickerOpen: boolean;
   dealDirectionPickerOpen: boolean;
+  reasoningMode: ChatReasoningMode | null;
   selectedLeadType: "b2c" | "b2b" | null;
   availableLeadTypes: Array<"b2b" | "b2c">;
   onInputChange: (value: string) => void;
   onRun: (targetLeadCount: number) => void;
   onLeadCountPickerChange: (open: boolean) => void;
+  onReasoningModeSelect: (mode: ChatReasoningMode) => void;
   onLeadTypeSelect: (leadType: LeadTypeChoice) => void;
   onDirectionSelect: (intent: DealIntent) => void;
   onInsufficientCredits: (targetLeadCount: number) => void;
@@ -2394,6 +2442,22 @@ function AgentMissionPage({
                 : language === "ar"
                   ? "سأحدد نوع العميل معك"
                   : "Lead type will be inferred"}
+          </span>
+        ) : null}
+        {reasoningMode ? (
+          <span className={`ops-reasoning-badge is-${reasoningMode}`}>
+            {reasoningMode === "fast" ? (
+              <Activity size={13} />
+            ) : (
+              <BrainCircuit size={13} />
+            )}
+            {reasoningMode === "fast"
+              ? language === "ar"
+                ? "سريع 1.5×"
+                : "Fast 1.5×"
+              : language === "ar"
+                ? "استدلال عميق"
+                : "High reasoning"}
           </span>
         ) : null}
         <header className="ops-chat-stage__intro">
@@ -2537,7 +2601,11 @@ function AgentMissionPage({
                 }
               }}
               placeholder={
-                !intent
+                !reasoningMode
+                  ? language === "ar"
+                    ? "اختر سرعة المحادثة أولاً"
+                    : "Choose a conversation mode first"
+                  : !intent
                   ? language === "ar"
                     ? "اختر الشراء أو البيع أولاً"
                     : "Choose Buy or Sell first"
@@ -2546,14 +2614,14 @@ function AgentMissionPage({
               aria-label={
                 language === "ar" ? "اكتب رسالة إلى وصلة" : "Message Wasla"
               }
-              disabled={!intent}
+              disabled={!intent || !reasoningMode}
             />
             <span className="ops-chat-composer__sparkle" aria-hidden="true">
               <Sparkles size={22} />
             </span>
             <LiquidMetalSubmitButton
               onClick={onSend}
-              disabled={busy || !intent}
+              disabled={busy || !intent || !reasoningMode}
               label={language === "ar" ? "إرسال الرسالة" : "Send message"}
             >
               {language === "ar" ? (
@@ -2564,6 +2632,46 @@ function AgentMissionPage({
             </LiquidMetalSubmitButton>
           </div>
         </BorderBeam>
+
+        {reasoningModePickerOpen ? (
+          <LeadSetupModal
+            title={
+              language === "ar"
+                ? "كيف تريد أن تفكر وصلة؟"
+                : "How should Wasla think?"
+            }
+            description={
+              language === "ar"
+                ? "اختر سرعة التأهيل قبل بدء هذه المحادثة."
+                : "Choose the qualification depth before this conversation starts."
+            }
+            choices={[
+              {
+                id: "fast",
+                icon: Activity,
+                title:
+                  language === "ar" ? "تلقين سريع 1.5×" : "Fast prompting 1.5×",
+                body:
+                  language === "ar"
+                    ? "من 3 إلى 5 أسئلة ذكية كحد أقصى"
+                    : "A maximum of 3–5 focused questions",
+              },
+              {
+                id: "high",
+                icon: BrainCircuit,
+                title:
+                  language === "ar" ? "استدلال عميق" : "High reasoning",
+                body:
+                  language === "ar"
+                    ? "يفهم منطق النشاط وسلسلة القيمة قبل الاستهداف"
+                    : "Understands the business logic and value chain first",
+              },
+            ]}
+            onChoose={(id) =>
+              onReasoningModeSelect(id as ChatReasoningMode)
+            }
+          />
+        ) : null}
 
         {leadTypePickerOpen ? (
           <LeadSetupModal
