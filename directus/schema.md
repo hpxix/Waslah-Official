@@ -27,12 +27,12 @@ The inventory can be shared across Waslah without leaking it across customers. A
 
 ## B2C Marketplace Acquisition
 
-- `b2c_campaigns`: the structured consumer intent, validated Haraj acquisition plan, run status, and live statistics.
-- `b2c_candidates`: Haraj posts and their cheap/semantic qualification result before contact resolution.
+- `b2c_campaigns`: the structured consumer intent, single-query acquisition plan, run status, and live statistics.
+- `b2c_candidates`: search results and their strict title-match decision before contact resolution.
 - `b2c_leads`: campaign-scoped consumer profiles deduplicated by normalized phone, author ID, then username, with grounded evidence.
 - `b2c_lead_outcomes`: delivered/contacted/replied/qualified/converted/rejected feedback for strategy learning.
 
-The B2C planner can only select tags present in the bundled `haraj_tags.json`. The server owns fixed GraphQL templates, pagination, credentials, qualification thresholds, contact resolution, and persistence. Phone lookups happen only after a candidate reaches the configured qualification threshold.
+The B2C planner creates one concise Saudi-Arabic product expression from the customer's offer or purchase request. The server owns fixed GraphQL templates, page-zero-to-exhaustion pagination, credentials, exact Arabic/English title matching, contact resolution, and persistence. Tags and category recipes are not used. Phone lookups happen only after a strict title match, and only valid Saudi mobile numbers are delivered.
 
 ## Calling And Qualification
 

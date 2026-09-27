@@ -127,7 +127,7 @@ try {
   await trx('wallets').where({ id: a.wallet }).update({ balance_halalas: 100 });
   const campaign = { id: randomUUID(), organization_id: a.org, user_id: a.user, request_id: requestId, name: 'Rollback B2C test', original_prompt: 'QA purchase', status: 'READY', target_lead_count: 30, intent: {}, acquisition_plan: {}, stats: {} };
   await trx('b2c_campaigns').insert(campaign);
-  const candidate = { postId: 999999123, authorId: 999999123, authorUsername: 'QA individual', city: 'Riyadh', title: 'QA item', tags: ['QA'], matchedStrategy: { tagName: 'QA', strategyType: 'DIRECT_INTENT', weight: 1 } };
+  const candidate = { postId: 999999123, authorId: 999999123, authorUsername: 'QA individual', city: 'Riyadh', title: 'QA item', tags: [], matchedStrategy: { query: 'اختبار', searchTerm: 'اختبار', englishTerm: 'QA', sourceMode: 'search', strategyType: 'DIRECT_INTENT', weight: 1 } };
   const qualification = { score: 85, identityConfidence: 85, purchasePropensity: 80, evidenceStrength: 85, marketplaceRole: 'SELLER', explanation: 'Synthetic persistence test', matchedSignals: ['QA'] };
   const inventoryId = await persistQualifiedB2CLead(trx, campaign, candidate, qualification, { contactMobile: '+966500000002' });
   await persistQualifiedB2CLead(trx, campaign, candidate, qualification, { contactMobile: '+966500000002' });

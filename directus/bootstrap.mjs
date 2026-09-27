@@ -291,7 +291,7 @@ const collections = [
   {
     name: "b2c_lead_outcomes",
     icon: "conversion_path",
-    note: "Conversion feedback for improving B2C acquisition recipes.",
+    note: "Conversion feedback for improving B2C search-query precision.",
     fields: {
       id: uuid(),
       outcome_key: string({ required: true, unique: true, length: 500 }),

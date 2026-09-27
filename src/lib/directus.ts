@@ -188,7 +188,7 @@ export type AdminB2CCampaign = {
     source_api: string | null;
     contact_api: string | null;
     api_operations: string[];
-    api_queries: Array<{ tag: string; cities: string[]; strategy_type: string; weight: number; pages: number; results_per_page: number; mode?: string; phase?: string; progress?: { nextPage?: number; pagesFetched?: number; postsFetched?: number; exhausted?: boolean } | null }>;
+    api_queries: Array<{ query: string; english_query?: string | null; cities: string[]; strategy_type: string; weight: number; pages: number; results_per_page: number; mode?: string; phase?: string; progress?: { nextPage?: number; pagesFetched?: number; postsFetched?: number; exhausted?: boolean } | null }>;
     qualification_thresholds: Record<string, number>;
     execution_rules: Array<{ id: string; label: string }>;
     execution_ledger: Array<{ at: string; pass: number; code: string; [key: string]: unknown }>;
@@ -236,7 +236,7 @@ export type AdminB2CActivity = {
   activity: Array<{
     id: string;
     fetched_ad: { operation: string; post_id: number; title: string; body: string; url: string; city: string; tags: string[]; author_username: string };
-    request: { tag: string; strategy_type: string; weight: number };
+    request: { query: string; strategy_type: string; weight: number };
     qualification: { status: string; score: number; marketplace_role: string; explanation: string; matched_signals: string[]; rejection_reasons: string[] };
     contact_call: { operation: string; attempted: boolean; outcome: string };
     created_at: string;

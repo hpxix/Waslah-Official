@@ -21,7 +21,7 @@ flowchart LR
 
 Directus owns identity, tenant boundaries, leads, wallet accounting, call artifacts, and audit events. n8n coordinates external work but is never the source of truth. If an n8n execution fails, the Directus request and outbox event remain available for retry.
 
-Sell-mode consumer requests use the B2C branch directly inside the lead-agent endpoint. The language model creates structured intent but cannot issue GraphQL. The server validates every selected tag against the bundled Haraj taxonomy, uses fixed queries, qualifies posts before contact lookup, and merges evidence at seller level.
+Sell-mode consumer requests use the B2C branch directly inside the lead-agent endpoint. The language model creates structured intent and exactly one concise Saudi-Arabic product expression but cannot issue GraphQL. The server uses a fixed search query, requires the Arabic expression or English equivalent in each advertisement title, resolves contacts only after that match, and merges evidence at seller level. No taxonomy tags or category recipes participate in retrieval.
 
 ## Request Lifecycle
 

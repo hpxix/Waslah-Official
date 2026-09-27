@@ -136,7 +136,7 @@ for (let index = 0; index < tests.length; index += 1) {
     body: { prompt: test.prompt, targetLeadCount: 30, planning: chat.planning, name: test.title },
   });
   await request(`/lead-agent/b2c/campaigns/${campaign.id}/run`, { method: "POST", token: staticToken, body: {} });
-  console.log(`TEST ${index + 1}/${tests.length} RUNNING tags=${chat.planning.acquisitionPlan.strategies.map((item) => item.tagName).join(" | ")}`);
+  console.log(`TEST ${index + 1}/${tests.length} RUNNING query=${chat.planning.acquisitionPlan.strategies.map((item) => item.searchTerm || item.query).join(" | ")}`);
   let current;
   let lastLine = "";
   const deadline = Date.now() + 30 * 60 * 1000;
@@ -154,7 +154,7 @@ for (let index = 0; index < tests.length; index += 1) {
   const durationSeconds = Math.round((Date.now() - startedAt) / 1000);
   summaries.push({
     title: test.title, owner: test.owner, status: current.status, durationSeconds,
-    chatText: chat.text, tags: chat.planning.acquisitionPlan.strategies.map((item) => item.tagName),
+    chatText: chat.text, queries: chat.planning.acquisitionPlan.strategies.map((item) => item.searchTerm || item.query),
     targetProfiles: chat.planning.acquisitionPlan.targetProfiles, stats: current.stats, error: current.errorMessage || null,
   });
   console.log(`TEST ${index + 1}/${tests.length} DONE ${current.status} in ${durationSeconds}s`);

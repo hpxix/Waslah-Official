@@ -4,7 +4,6 @@ import { ResearchError, startResearch, observeResearch, publicResearch } from ".
 import {
   createB2CPlan,
   createB2CDiscoveryTurn,
-  selectB2CLeadPaths,
   buildPublicB2CExplanation,
   runB2CCampaign,
   serializeB2CLead,
@@ -1686,36 +1685,21 @@ export default {
       const conversationId = req.body?.conversation_id || req.body?.conversationId;
       const dealIntent = req.body?.deal_intent === "buy" ? "buy" : "sell";
       const reasoningMode = req.body?.reasoning_mode === "fast" ? "fast" : "high";
-      const suppliedPlanning = req.body?.planning;
       if (prompt.length < 3) throw new ApiError(400, "B2C_PROMPT_REQUIRED", "Describe the product or service you want to sell.");
       if (prompt.length > 4000) throw new ApiError(400, "B2C_PROMPT_TOO_LONG", "Keep the request under 4,000 characters.");
       const baseBusinessContext = await waslaBusinessContext(database, context.organization);
       const conversationState = await b2cConversationContext(database, context, conversationId, clientTranscript);
       const transcript = conversationState.transcript;
       const businessContext = `${baseBusinessContext}\nConversation memory (use as facts; do not repeat answered questions): ${JSON.stringify(conversationState.memoryContext)}`;
-      if (dealIntent === "sell" && suppliedPlanning?.acquisitionPlan?.leadPaths?.length && /^SELECT_PATHS?:/i.test(prompt)) {
-        const planning = selectB2CLeadPaths(suppliedPlanning, prompt);
-        const selectedNames = planning.acquisitionPlan.leadPaths.filter((path) => path.selected).map((path) => path.name);
-        const text = language === "ar"
-          ? `ممتاز. سنبحث عبر ${selectedNames.join("، ")} ونشترط إشارات طلب واضحة، مع استبعاد المنافسين ومقدمي الخدمة نفسها. اكتب «ابدأ» لاختيار عدد العملاء.`
-          : `Excellent. We’ll search through ${selectedNames.join(", ")}, require clear demand evidence, and exclude competitors and sellers of the same service. Reply “start” to choose the lead count.`;
-        await createChatLog(database, context, { conversationId, mode: "b2c", language, leadType: "b2c", dealIntent, message: prompt, response: text, transcript, understoodData: planning, outcome: "lead_path_confirmed", status: "completed" }).catch((error) => logger.error(error));
-        await rememberConversation(database, context, { conversationId, leadType: "b2c", dealIntent, message: prompt, summary: selectedNames.join(", "), missing: [], b2cIntent: planning.intent, acquisitionPlan: planning.acquisitionPlan, confidence: 100, outcome: "lead_path_confirmed" }).catch((error) => logger.error(error));
-        res.json({ data: { text, planning, ready: true, missing: [], brief: planning.intent.productDescription, stage: "ready_for_quantity" } });
-        return;
-      }
       const discovery = await createB2CDiscoveryTurn(env, { message: prompt, transcript, language, dealIntent, businessContext, reasoningMode });
       if (!discovery.ready) {
         await createChatLog(database, context, { conversationId, mode: "b2c", language, leadType: "b2c", dealIntent, message: prompt, response: discovery.reply, transcript, understoodData: discovery, outcome: "discovery", status: "qualifying" }).catch((error) => logger.error(error));
         await rememberConversation(database, context, { conversationId, leadType: "b2c", dealIntent, message: prompt, summary: discovery.summary, missing: discovery.missing, knownFacts: discovery.knownFacts, answeredTopics: discovery.answeredTopics, confidence: discovery.confidence, outcome: "discovery" }).catch((error) => logger.error(error));
-        res.json({ data: { text: discovery.reply, planning: null, ready: false, missing: discovery.missing, brief: discovery.summary, recommendedTagIds: discovery.recommendedTagIds } });
+        res.json({ data: { text: discovery.reply, planning: null, ready: false, missing: discovery.missing, brief: discovery.summary } });
         return;
       }
       const planningPrompt = dealIntent === "buy" ? `[PROCUREMENT_FROM_CONSUMERS] ${discovery.summary}` : discovery.summary;
-      let planning = await createB2CPlan(env, planningPrompt, { preferredTagIds: discovery.confirmedTagIds.length ? discovery.confirmedTagIds : discovery.recommendedTagIds });
-      if (dealIntent === "sell" && planning.acquisitionPlan.pathSelectionRequired) {
-        planning = selectB2CLeadPaths(planning, planning.acquisitionPlan.leadPaths.map((path) => path.id));
-      }
+      const planning = await createB2CPlan(env, planningPrompt);
       const { intent, acquisitionPlan } = planning;
       const strength = acquisitionPlan.strategies.length >= 4 ? (language === "ar" ? "قوية" : "strong") : (language === "ar" ? "مبدئية" : "focused");
       const profiles = acquisitionPlan.targetProfiles.slice(0, 3).join(language === "ar" ? "، " : ", ");
@@ -1830,8 +1814,8 @@ export default {
         res.json({ data: serializeCampaign(campaign) });
         return;
       }
-      // Revalidate persisted plans before every retry so campaigns created with an
-      // older taxonomy mapper cannot repeat a bad category selection.
+      // Rebuild persisted plans before every retry so older campaigns are
+      // migrated to the one-query, strict-title execution contract.
       const refreshedPlanning = await validateB2CPlan(env, campaign.original_prompt, {
         intent: parseStoredJson(campaign.intent, {}),
         acquisitionPlan: parseStoredJson(campaign.acquisition_plan, {}),
@@ -3672,37 +3656,35 @@ export default {
           target_count: Number(row.target_lead_count || 0), delivered_count: Number(stats.uniqueLeads || stats.unique_leads || 0),
           deal_intent: intent.dealIntent || intent.deal_intent || "sell", intent, acquisition_plan: acquisitionPlan,
           internal_audit: {
-            algorithm: "Wasla B2C Intent-to-Signal Engine v2",
-            source_api: env.HARAJ_POSTS_URL || env.HARAJ_GRAPHQL_BASE_URL || null,
+            algorithm: "Wasla B2C One-Query Title Match v1",
+            source_api: env.HARAJ_SEARCH_URL || env.HARAJ_GRAPHQL_BASE_URL || env.HARAJ_POSTS_URL || null,
             contact_api: env.HARAJ_POST_CONTACT_URL || env.HARAJ_GRAPHQL_BASE_URL || null,
-            api_operations: ["FetchAds", "PostContactQuery"],
+            api_operations: ["Search", "PostContactQuery"],
             api_queries: (acquisitionPlan.strategies || []).map((strategy) => ({
-              tag: strategy.tagName, cities: strategy.cities || [], strategy_type: strategy.strategyType,
+              query: strategy.searchTerm || strategy.query, english_query: strategy.englishTerm || null, cities: strategy.cities || [], strategy_type: strategy.strategyType,
               weight: strategy.weight, pages: pageLimit, results_per_page: resultLimit,
-              mode: strategy.sourceMode || "category", phase: strategy.phase || "primary",
-              progress: stats.strategyProgress?.[String(strategy.pathId || strategy.tagId || strategy.tagName)] || null,
+              mode: "search", phase: "primary",
+              progress: stats.strategyProgress?.[String(strategy.pathId || strategy.searchTerm || strategy.query)] || null,
             })),
             qualification_thresholds: acquisitionPlan.qualification || {},
             execution_rules: stats.executionRules || [],
             execution_ledger: stats.executionLedger || [],
             exact_count_contract: stats.exactCountContract || { requested: Number(row.target_lead_count || 0), delivered: Number(stats.uniqueLeads || 0), remaining: Math.max(0, Number(row.target_lead_count || 0) - Number(stats.uniqueLeads || 0)) },
             recovery: {
-              enabled: true,
-              round: Number(stats.recoveryRound || acquisitionPlan.recovery?.round || 0),
-              maximum_rounds: safeInteger(env.B2C_MAX_RECOVERY_ROUNDS, 6, 0, 20),
-              fallback_activated: Boolean(stats.searchFallbackActivated),
+              enabled: false,
+              round: 0,
+              maximum_rounds: 0,
+              fallback_activated: false,
               source_exhausted: Boolean(stats.sourceExhausted),
               contact_authentication: stats.contactAuthentication || "not_rejected",
             },
             stages: [
-              "Translate the offer into buyer/owner intent and exclusion signals",
-              "Map signals to validated Saudi marketplace taxonomy tags and downstream buyer paths",
-              "Fetch fresh pages for every approved path and persist its cursor",
-              "Classify marketplace role and score identity, purchase propensity, evidence, recency, activity and geography",
-              "Reject sellers, resellers, competitors and weak matches for sell campaigns",
+              "Interpret the customer's product or service into one concrete Saudi-Arabic search expression",
+              "Search that exact expression from page zero through every fresh result page",
+              "Require the Arabic expression or its English equivalent to appear in the advertisement title",
               "Deduplicate before contact resolution and reject anyone previously delivered to the workspace",
-              "Resolve contact details only for qualified candidates using the authenticated connection",
-              "Expand into new AI-generated buyer-side paths when the current paths are exhausted",
+              "Resolve contact details for title-matched advertisements using the authenticated connection",
+              "Deliver only records with a valid Saudi mobile number",
               "Complete only when the exact requested quantity has been delivered",
             ],
             stats,
@@ -3787,7 +3769,7 @@ export default {
         return {
           id: row.id,
           fetched_ad: {
-            operation: "FetchAds",
+            operation: "Search",
             post_id: row.post_id,
             title: cleanText(row.title, 500),
             body: cleanText(row.body_text, 12_000),
@@ -3797,7 +3779,7 @@ export default {
             author_username: cleanText(row.author_username, 160),
           },
           request: {
-            tag: cleanText(strategy.tagName, 160),
+            query: cleanText(strategy.searchTerm || strategy.query, 160),
             strategy_type: cleanText(strategy.strategyType, 80),
             weight: Number(strategy.weight || 0),
           },

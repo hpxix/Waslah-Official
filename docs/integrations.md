@@ -8,7 +8,7 @@
 | n8n | `N8N_LEAD_AGENT_WEBHOOK_URL`, `N8N_WEBHOOK_SECRET`, `N8N_ENCRYPTION_KEY` | Workflow orchestration and callback authentication |
 | Apify | `APIFY_TOKEN`, `APIFY_ACTOR_ID` | Lead sourcing |
 | OpenRouter | `OPENROUTER_API_KEY`, `OPENROUTER_RESEARCH_MODEL` | Perplexity-backed deep research through one model gateway |
-| Haraj | `HARAJ_POSTS_URL`, `HARAJ_POST_CONTACT_URL`, `HARAJ_BEARER_TOKEN` | B2C marketplace retrieval and post contact resolution |
+| Haraj | `HARAJ_SEARCH_URL`, `HARAJ_POST_CONTACT_URL`, `HARAJ_BEARER_TOKEN` | B2C search retrieval and authenticated post contact resolution |
 | Vapi | `VAPI_API_KEY`, `VAPI_ASSISTANT_ID`, `VAPI_PHONE_NUMBER_ID`, `VAPI_WEBHOOK_SECRET` | AI qualification calls and callbacks |
 | Twilio Verify | `SMS_PROVIDER=twilio`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID` | Production phone OTP |
 | Google Identity | `AUTH_GOOGLE_CLIENT_ID`, `AUTH_GOOGLE_CLIENT_SECRET` | Google account creation and sign-in |
@@ -65,9 +65,9 @@ API references: [Postiz create post](https://docs.postiz.com/public-api/posts/cr
 
 ## Haraj B2C
 
-Keep live Haraj credentials in the ignored `.env.haraj` file. Directus reads it server-side in Docker; the frontend never receives the bearer token. The bundled taxonomy at `directus/extensions/directus-extension-waslah-lead-agent/dist/data/haraj_tags.json` is the only allowed tag source.
+Keep live Haraj credentials in the ignored `.env.haraj` file. Directus reads them server-side in Docker; the frontend never receives the bearer token.
 
-The B2C run first retrieves posts with a fixed query, stores and qualifies candidates, rejects likely sellers or competitors, and only then calls `postContact(postId)` for qualified HOT/WARM candidates. Tune page and scoring limits with the `HARAJ_*` and `B2C_*` settings documented in `.env.docker.example`.
+The B2C planner reduces the customer's full context to exactly one concise Saudi-Arabic product expression, preserving a model or version when necessary. The runner calls the search operation from page zero onward. An advertisement qualifies only when its title contains the Arabic expression or its English equivalent. Candidates are deduplicated, and `postContact(postId, isManualRequest: true)` is called through the authenticated server connection. Only unique records with valid Saudi mobile numbers are delivered. No tag taxonomy, category lookup, or synonym recovery is used.
 
 ## n8n
 

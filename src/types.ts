@@ -108,8 +108,10 @@ export type IntakeState = {
 };
 
 export type B2CStrategy = {
-  tagId: string;
-  tagName: string;
+  query: string;
+  searchTerm: string;
+  englishTerm?: string | null;
+  sourceMode: "search";
   strategyType:
     | "DIRECT_INTENT"
     | "ADJACENT_INTENT"
@@ -117,27 +119,10 @@ export type B2CStrategy = {
     | "DEVICE_PROXY"
     | "OWNERSHIP_PROXY";
   weight: number;
-  positiveKeywords: string[];
-  negativeKeywords: string[];
   cities: string[];
   reason: string;
   pathId?: string;
   advertiserRole?: string;
-};
-
-export type B2CLeadPath = {
-  id: string;
-  tagId: string;
-  tagName: string;
-  name: string;
-  strategyType: B2CStrategy["strategyType"];
-  advertiserRole: string;
-  reason: string;
-  requiredSignals: string[];
-  excludedSignals: string[];
-  confidence: number;
-  question: string;
-  selected: boolean;
 };
 
 export type B2CPlanning = {
@@ -169,9 +154,6 @@ export type B2CPlanning = {
     product: string;
     targetProfiles: string[];
     dealIntent?: "buy" | "sell";
-    leadPaths?: B2CLeadPath[];
-    selectedPathIds?: string[];
-    pathSelectionRequired?: boolean;
     strategies: B2CStrategy[];
     qualification: {
       minimumLeadScore: number;
@@ -179,11 +161,4 @@ export type B2CPlanning = {
       minimumPurchasePropensity: number;
     };
   };
-  taxonomyMatches: Array<{
-    tagId: string;
-    tagName: string;
-    relevanceScore: number;
-    matchedSignal: string;
-    reason: string;
-  }>;
 };
