@@ -10869,24 +10869,24 @@ html.is-language-switching #root {
   }
 }
 
-/* shadcn preset b7kBs9lVD9 — Nova, zinc, medium radius, Geist Mono + Instrument Sans. */
+/* shadcn preset bdvy8Rd2 — Mira, zinc, large radius, Inter. */
 #root .hconsole {
-  --font-english: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  --radius: 0.625rem;
+  --font-english: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --radius: 0.875rem;
   --background: #09090b;
   --foreground: #fafafa;
   --card: #18181b;
   --popover: #18181b;
-  --primary: #f4f4f5;
+  --primary: #ffff51;
   --primary-foreground: #18181b;
   --secondary: #27272a;
   --muted: #27272a;
   --muted-foreground: #a1a1aa;
   --accent: #27272a;
   --border: #3f3f46;
-  --sidebar: rgba(9, 9, 11, 0.88);
+  --sidebar: #18181b;
   --ops-bg: #09090b;
-  --ops-sidebar: rgba(9, 9, 11, 0.88);
+  --ops-sidebar: #18181b;
   --ops-panel: #18181b;
   --ops-panel-strong: #202023;
   --ops-border: #303036;
@@ -10894,26 +10894,29 @@ html.is-language-switching #root {
   --ops-text: #fafafa;
   --ops-muted: #a1a1aa;
   --ops-subtle: #71717a;
-  --ops-green: #f4f4f5;
+  --ops-green: #ffff51;
   --ops-blue: #d4d4d8;
   --ops-amber: #a1a1aa;
-  --growth-accent: #f4f4f5;
+  --growth-accent: #ffff51;
   --growth-blue: #d4d4d8;
   background: #09090b;
 }
 
 #root .hconsole:not(.is-arabic) {
-  font-family: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
 }
 
 #root .hconsole:not(.is-arabic) :is(h1, h2, h3, h4, .dashboard-page-heading h1, .admin-control__hero h1) {
-  font-family: "Instrument Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  font-family: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
 }
 
 #root .hconsole-shell,
-#root .hconsole-main,
-#root .dashboard-sidebar [data-slot="sidebar-inner"] {
+#root .hconsole-main {
   background-color: #09090b;
+}
+
+#root .dashboard-sidebar [data-slot="sidebar-inner"] {
+  background-color: #18181b;
 }
 
 #root .hconsole-main {
@@ -10925,15 +10928,15 @@ html.is-language-switching #root {
 #root .ops-agent-page__status i,
 #root .lead-reveal header i,
 #root .wasla-nav-capsule__sheet footer span i {
-  background: #d4d4d8;
-  box-shadow: none;
+  background: #ffff51;
+  box-shadow: 0 0 12px rgba(255,255,81,.35);
 }
 
 #root .lead-run-reveal__score > i em,
 #root .ops-agent-page__readiness b,
 #root .lead-reveal__row span:last-child i,
 #root .insights-command__accounts i {
-  background: linear-gradient(90deg, #fafafa, #71717a);
+  background: linear-gradient(90deg, #ffff51, #b8b83c);
 }
 
 #root .ops-command {
@@ -10944,18 +10947,18 @@ html.is-language-switching #root {
 }
 
 #root .lead-reveal__scan {
-  background: linear-gradient(90deg, transparent, #d4d4d8, #71717a, transparent);
+  background: linear-gradient(90deg, transparent, #ffff51, #a1a13b, transparent);
 }
 
 #root .growth-workspace,
 #root .wasla-academy,
 #root .growth-modal-backdrop {
-  --growth-accent: #f4f4f5;
+  --growth-accent: #ffff51;
   --growth-blue: #a1a1aa;
 }
 
 #root .settings-dialog__initial-toggle input {
-  accent-color: #d4d4d8;
+  accent-color: #ffff51;
 }
 
 #root .admin-inventory {
@@ -10965,11 +10968,11 @@ html.is-language-switching #root {
 
 #root .admin-inventory__heading > div:first-child > span,
 #root .admin-enrichment.is-enriched {
-  color: #d4d4d8;
+  color: #ffff51;
 }
 
 #root .admin-enrichment.is-enriched i {
-  background: #d4d4d8;
+  background: #ffff51;
 }
 
 #root .admin-inventory__toolbar,
@@ -10996,7 +10999,7 @@ html.is-language-switching #root {
 }
 
 #root .admin-inventory__views button.is-active {
-  background: #f4f4f5;
+  background: #ffff51;
   color: #18181b;
 }
 
@@ -11009,17 +11012,17 @@ html.is-language-switching #root {
 }
 
 #root .admin-feature-grid i.is-on {
-  background: #d4d4d8;
-  box-shadow: 0 0 0 5px rgba(212, 212, 216, 0.08);
+  background: #ffff51;
+  box-shadow: 0 0 0 5px rgba(255, 255, 81, 0.08);
 }
 
 #root .admin-memory-grid header b {
-  color: #d4d4d8;
+  color: #ffff51;
 }
 
 #root .admin-kind.is-b2b,
 #root .admin-kind.is-b2c {
-  color: #d4d4d8;
+  color: #ffff51;
   border-color: #52525b;
 }
 

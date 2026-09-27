@@ -1315,7 +1315,12 @@ function ConsoleShell({
           open={!sidebarCollapsed}
           onOpenChange={(open) => setSidebarCollapsed(!open)}
           className="hconsole-shell wasla-dashboard dark"
-          style={{ "--sidebar-width": "248px" } as React.CSSProperties}
+          style={
+            {
+              "--sidebar-width": "248px",
+              "--sidebar-width-icon": "64px",
+            } as React.CSSProperties
+          }
         >
           <SidebarMetalBridge>
             {(collapsed, toggle) => (
@@ -1329,7 +1334,7 @@ function ConsoleShell({
           <Sidebar
             side={language === "ar" ? "right" : "left"}
             variant="inset"
-            collapsible="offcanvas"
+            collapsible="icon"
             closeOnAction
             className="dashboard-sidebar"
             dir={direction}
@@ -1356,7 +1361,9 @@ function ConsoleShell({
               <SidebarGroup>
                 <UiButton className="dashboard-new-chat" onClick={startNewChat}>
                   <Plus size={16} />
-                  {language === "ar" ? "محادثة جديدة" : "New conversation"}
+                  <span>
+                    {language === "ar" ? "محادثة جديدة" : "New conversation"}
+                  </span>
                 </UiButton>
                 <SidebarGroupLabel>
                   {language === "ar" ? "مساحة العمل" : "Workspace"}
@@ -1370,6 +1377,7 @@ function ConsoleShell({
                         <SidebarMenuButton
                           isActive={activeTab === key}
                           onClick={() => selectTab(key)}
+                          tooltip={tabLabels[key]}
                           data-tour={key}
                           aria-current={activeTab === key ? "page" : undefined}
                         >
@@ -1393,6 +1401,9 @@ function ConsoleShell({
                 <SidebarMenu>
                   <SidebarMenuItem>
                     <SidebarMenuButton
+                      tooltip={
+                        language === "ar" ? "كيف تستخدم وصلة" : "Getting started"
+                      }
                       onClick={() => {
                         setSidebarCollapsed(true);
                         setTourOpen(true);
@@ -1408,6 +1419,7 @@ function ConsoleShell({
                   </SidebarMenuItem>
                   <SidebarMenuItem>
                     <SidebarMenuButton
+                      tooltip={language === "ar" ? "الإعدادات" : "Settings"}
                       onClick={() => {
                         setSidebarCollapsed(true);
                         setSettingsOpen(true);

@@ -2,32 +2,35 @@
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities);
 @import "tw-animate-css";
+@import "@fontsource-variable/inter";
 @source "./components/ui";
 @source "./components/DashboardOverview.tsx";
 @source "./App.tsx";
 @custom-variant dark (&:is(.dark *));
 @theme inline {
   --color-background: var(--background); --color-foreground: var(--foreground);
-  --color-card: var(--card); --color-card-foreground: var(--foreground);
-  --color-popover: var(--popover); --color-popover-foreground: var(--foreground);
+  --color-card: var(--card); --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover); --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary); --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary); --color-secondary-foreground: var(--foreground);
+  --color-secondary: var(--secondary); --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted); --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent); --color-accent-foreground: var(--foreground);
-  --color-destructive: #e98d85; --color-border: var(--border); --color-input: var(--border); --color-ring: #7b7b7b;
-  --color-sidebar: var(--sidebar); --color-sidebar-foreground: var(--foreground);
-  --color-sidebar-primary: var(--primary); --color-sidebar-primary-foreground: var(--primary-foreground);
-  --color-sidebar-accent: var(--accent); --color-sidebar-accent-foreground: var(--foreground);
-  --color-sidebar-border: var(--border); --color-sidebar-ring: #7b7b7b;
+  --color-accent: var(--accent); --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive); --color-border: var(--border); --color-input: var(--input); --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar); --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary); --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent); --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border); --color-sidebar-ring: var(--sidebar-ring); --font-heading: var(--font-sans); --font-sans: 'Inter Variable', sans-serif; --color-chart-5: var(--chart-5); --color-chart-4: var(--chart-4); --color-chart-3: var(--chart-3); --color-chart-2: var(--chart-2); --color-chart-1: var(--chart-1); --radius-sm: calc(var(--radius) * 0.6); --radius-md: calc(var(--radius) * 0.8); --radius-lg: var(--radius); --radius-xl: calc(var(--radius) * 1.4); --radius-2xl: calc(var(--radius) * 1.8); --radius-3xl: calc(var(--radius) * 2.2); --radius-4xl: calc(var(--radius) * 2.6);
 }
 .wasla-dashboard, .wasla-ui-portal {
-  --background:#0c0c0c; --foreground:#ededed; --card:#171717; --popover:#202020;
-  --primary:#e8e8e8; --primary-foreground:#161616; --secondary:#252525; --muted:#232323;
-  --muted-foreground:#959595; --accent:#2b2b2b; --border:#303030; --sidebar:#171717; --ops-muted:#a7a7a7; --ops-text:#ededed;
-  color:var(--foreground); color-scheme:dark;
+  --background:oklch(0.141 0.005 285.823); --foreground:oklch(0.985 0 0); --card:oklch(0.21 0.006 285.885); --card-foreground:oklch(0.985 0 0); --popover:oklch(0.21 0.006 285.885); --popover-foreground:oklch(0.985 0 0);
+  --primary:#ffff51; --primary-foreground:#18181b; --secondary:oklch(0.274 0.006 286.033); --secondary-foreground:oklch(0.985 0 0); --muted:oklch(0.274 0.006 286.033);
+  --muted-foreground:oklch(0.705 0.015 286.067); --accent:oklch(0.274 0.006 286.033); --accent-foreground:oklch(0.985 0 0); --destructive:oklch(0.704 0.191 22.216); --border:oklch(1 0 0 / 10%); --input:oklch(1 0 0 / 15%); --ring:#ffff51;
+  --chart-1:#ffff51; --chart-2:oklch(0.705 0.015 286.067); --chart-3:oklch(0.552 0.016 285.938); --chart-4:oklch(0.442 0.017 285.786); --chart-5:oklch(0.274 0.006 286.033); --radius:0.875rem;
+  --sidebar:oklch(0.21 0.006 285.885); --sidebar-foreground:oklch(0.985 0 0); --sidebar-primary:#ffff51; --sidebar-primary-foreground:#18181b; --sidebar-accent:oklch(0.274 0.006 286.033); --sidebar-accent-foreground:oklch(0.985 0 0); --sidebar-border:oklch(1 0 0 / 10%); --sidebar-ring:#ffff51; --ops-muted:oklch(0.705 0.015 286.067); --ops-text:oklch(0.985 0 0);
+  color:var(--foreground); color-scheme:dark; font-family:'Inter Variable',var(--font-arabic),sans-serif;
 }
-#root .hconsole { background:#171717; }
-#root .hconsole-shell { display:flex; gap:0; padding:0; border:0; border-radius:0; min-height:100dvh; background:#171717; box-shadow:none; width:100%; }
+#root .hconsole { background:oklch(0.21 0.006 285.885); }
+#root .hconsole-shell { display:flex; gap:0; padding:0; border:0; border-radius:0; min-height:100dvh; background:oklch(0.21 0.006 285.885); box-shadow:none; width:100%; }
 #root .hconsole-main { position:relative; min-width:0; display:flex; flex:1; flex-direction:column; margin:8px 8px 8px 0; background:#0c0c0c; border:1px solid #292929; border-radius:16px; overflow:clip; padding:0 0 68px; min-height:calc(100dvh - 16px); }
 #root [dir="rtl"] .hconsole-main { margin:8px 0 8px 8px; }
 #root .hconsole.has-collapsed-sidebar .hconsole-main { margin-inline:8px; }
@@ -36,7 +39,7 @@
 #root .hconsole-tabs>[data-slot="tabs-content"] { min-width:0; }
 #root .hconsole-tabs>[data-slot="tabs-content"][data-state="inactive"] { display:none; }
 :is(#root .dashboard-sidebar, .wasla-ui-portal.dashboard-sidebar) { padding:0; border:0; }
-:is(#root .dashboard-sidebar, .wasla-ui-portal.dashboard-sidebar) [data-slot="sidebar-inner"] { padding:10px; background:#171717; }
+:is(#root .dashboard-sidebar, .wasla-ui-portal.dashboard-sidebar) [data-slot="sidebar-inner"] { padding:10px; background:var(--sidebar); }
 :is(#root, .wasla-ui-portal) .dashboard-sidebar-head { padding:14px 6px 16px; gap:14px; }
 :is(#root, .wasla-ui-portal) .dashboard-brand { display:flex; align-items:center; gap:10px; min-height:26px; text-decoration:none; padding-inline-end:36px; }
 :is(#root, .wasla-ui-portal) .dashboard-brand .wasla-brand { width:71px; height:23px; color:#eee; }
@@ -46,14 +49,14 @@
 :is(#root .dashboard-sidebar, .wasla-ui-portal.dashboard-sidebar) [data-slot="sidebar-menu"] { margin:0; padding:0; list-style:none; gap:4px; }
 :is(#root .dashboard-sidebar, .wasla-ui-portal.dashboard-sidebar) [data-slot="sidebar-menu-button"] { font-size:12px; min-height:38px; width:100%; text-align:start; border:1px solid transparent; background:transparent; padding:9px 11px; border-radius:7px; color:#b8b8b8; display:flex; gap:11px; justify-content:flex-start; cursor:pointer; }
 :is(#root .dashboard-sidebar, .wasla-ui-portal.dashboard-sidebar) [data-slot="sidebar-menu-button"]:hover { background:#252525; color:#f1f1f1; }
-:is(#root .dashboard-sidebar, .wasla-ui-portal.dashboard-sidebar) [data-slot="sidebar-menu-button"][data-active="true"] { background:#2c2c2c; border-color:#393939; color:#fafafa; box-shadow:inset 0 1px 0 #ffffff05; }
+:is(#root .dashboard-sidebar, .wasla-ui-portal.dashboard-sidebar) [data-slot="sidebar-menu-button"][data-active="true"] { background:color-mix(in srgb,#ffff51 12%,transparent); border-color:color-mix(in srgb,#ffff51 32%,transparent); color:#ffffb1; box-shadow:inset 3px 0 0 #ffff51; }
 :is(#root, .wasla-ui-portal) .dashboard-nav-count { margin-inline-start:auto; color:#c2c2c2; border:1px solid #414141; padding:1px 6px; border-radius:5px; font-size:10px; }
-:is(#root, .wasla-ui-portal) .dashboard-new-chat { width:100%; background:#e8e8e8; color:#151515; border:1px solid #efefef; font-size:12px; justify-content:flex-start; height:38px; margin-bottom:8px; }
+:is(#root, .wasla-ui-portal) .dashboard-new-chat { width:100%; background:#ffff51; color:#18181b; border:1px solid #ffff8a; font-size:12px; justify-content:flex-start; height:38px; margin-bottom:8px; }
 :is(#root, .wasla-ui-portal) .dashboard-sidebar-bottom { margin-top:auto; padding-block:0!important; }
 :is(#root, .wasla-ui-portal) .dashboard-wallet { background:linear-gradient(145deg,#252525,#1b1b1b); border:1px solid #363636; padding:16px 0; border-radius:10px; box-shadow:none; gap:0; }
 :is(#root, .wasla-ui-portal) .dashboard-wallet [data-slot="card-content"] { padding:0 14px; }
 :is(#root, .wasla-ui-portal) .dashboard-wallet [data-slot="card-content"]>div { display:flex; align-items:center; gap:7px; font-size:10px; color:#a6a6a6; }
-:is(#root, .wasla-ui-portal) .dashboard-wallet-dot { width:5px; height:5px; border-radius:50%; background:#91bc9a; margin-inline-start:auto; }
+:is(#root, .wasla-ui-portal) .dashboard-wallet-dot { width:5px; height:5px; border-radius:50%; background:#ffff51; box-shadow:0 0 12px #ffff5188; margin-inline-start:auto; }
 :is(#root, .wasla-ui-portal) .dashboard-wallet strong { display:flex; align-items:baseline; gap:8px; font-size:27px; font-weight:550; line-height:1.4; margin:8px 0 2px; }
 :is(#root, .wasla-ui-portal) .dashboard-wallet strong small { font-size:10px; color:#999; font-weight:400; }
 :is(#root, .wasla-ui-portal) .dashboard-wallet p { font-size:9px; margin:0; color:#898989; }
@@ -115,6 +118,26 @@
 [data-slot="sheet-overlay"] { z-index:1090; }
 #root .hconsole-tabs>[data-slot="tabs-content"][data-state="active"] { animation:dashboard-enter .22s ease-out; }
 @keyframes dashboard-enter { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:translateY(0); } }
+@media(min-width:768px) {
+  #root [data-slot="sidebar"][data-collapsible="icon"] .dashboard-sidebar [data-slot="sidebar-inner"] { padding:10px 8px; border-inline-end:1px solid var(--sidebar-border); }
+  #root [data-slot="sidebar"][data-collapsible="icon"] .dashboard-sidebar-head { min-height:70px; padding:0; }
+  #root [data-slot="sidebar"][data-collapsible="icon"] .dashboard-sidebar-head>* { visibility:hidden; pointer-events:none; }
+  #root [data-slot="sidebar"][data-collapsible="icon"] .dashboard-sidebar [data-slot="sidebar-group"] { padding:0 4px 12px; }
+  #root [data-slot="sidebar"][data-collapsible="icon"] .dashboard-sidebar [data-slot="sidebar-group-label"] { display:none; }
+  #root [data-slot="sidebar"][data-collapsible="icon"] .dashboard-new-chat { width:40px; height:40px; min-width:40px; margin:0 auto 12px; padding:0; justify-content:center; border-radius:12px; }
+  #root [data-slot="sidebar"][data-collapsible="icon"] .dashboard-new-chat>span { display:none; }
+  #root [data-slot="sidebar"][data-collapsible="icon"] .dashboard-sidebar [data-slot="sidebar-menu"] { gap:7px; align-items:center; }
+  #root [data-slot="sidebar"][data-collapsible="icon"] .dashboard-sidebar [data-slot="sidebar-menu-button"] { width:40px!important; height:40px!important; min-height:40px; margin-inline:auto; padding:0!important; justify-content:center; border-radius:12px; }
+  #root [data-slot="sidebar"][data-collapsible="icon"] .dashboard-sidebar [data-slot="sidebar-menu-button"]>span,
+  #root [data-slot="sidebar"][data-collapsible="icon"] .dashboard-nav-count { display:none; }
+  #root [data-slot="sidebar"][data-collapsible="icon"] .dashboard-sidebar [data-slot="sidebar-menu-button"][data-active="true"] { box-shadow:inset 0 -3px 0 #ffff51; }
+  #root [data-slot="sidebar"][data-collapsible="icon"] .dashboard-sidebar-bottom { margin-top:auto; }
+  #root [data-slot="sidebar"][data-collapsible="icon"] .dashboard-wallet { display:none; }
+  #root [data-slot="sidebar"][data-collapsible="icon"] [data-slot="sidebar-footer"] { padding:8px 4px 4px; }
+  #root [data-slot="sidebar"][data-collapsible="icon"] .hconsole-profile-card { justify-content:center; padding:12px 0 4px; }
+  #root [data-slot="sidebar"][data-collapsible="icon"] .hconsole-profile-card__identity,
+  #root [data-slot="sidebar"][data-collapsible="icon"] .hconsole-profile-card>button { display:none; }
+}
 @media(max-width:1200px) { #root .dashboard-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media(max-width:767px) {
   #root .hconsole-main, #root [dir="rtl"] .hconsole-main { margin:0; border-radius:0; border-inline:0; min-height:100dvh; }
