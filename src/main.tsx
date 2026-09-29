@@ -2,7 +2,7 @@ import { Refine } from "@refinedev/core";
 import routerProvider from "@refinedev/react-router";
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { Toast } from "@heroui/react";
+import { Toaster } from "sonner";
 import { BrowserRouter } from "react-router";
 import "@fontsource-variable/geist-mono";
 import "@fontsource-variable/instrument-sans";
@@ -15,7 +15,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <BrowserRouter>
       <LanguageProvider>
-      <Toast.Provider className="wasla-toast-region" placement="top end" width={460} maxVisibleToasts={4} />
+      <Toaster theme="dark" position="top-right" closeButton duration={4500} richColors />
       <Refine
         routerProvider={routerProvider}
         resources={[

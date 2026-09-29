@@ -104,7 +104,7 @@ import {
   researchLead,
   logoutAccount,
 } from "./lib/directus";
-import type { AdminLead } from "./lib/directus";
+import type { AdminLead, LeadJob } from "./lib/directus";
 import type { CompanyResearch, IntakeState, Lead } from "./types";
 import { LeadFlowVisual } from "./components/LeadFlowVisual";
 import { WaslaBrand } from "./components/WaslaBrand";
@@ -631,13 +631,19 @@ function ConsoleShell({
     )
       return;
     lastLeadErrorToast.current = toastIdentity;
+    setConsoleMessages((messages) => [...messages, {
+      role: "assistant",
+      text: language === "ar"
+        ? `توقف البحث: ${leadWorkspace.error}\n\nيمكنك تعديل الطلب أو إعادة المحاولة. النتائج المحفوظة ما زالت متاحة.`
+        : `The search stopped: ${leadWorkspace.error}\n\nYou can adjust your brief or retry. Saved results remain available.`,
+    }]);
     if (settledLeadShortfall && leadWorkspace.job) {
       const delivered = Number(leadWorkspace.job.result_count);
       const noticeKey = `wasla:lead-shortfall-toast:${leadWorkspace.job.id}`;
       if (window.localStorage.getItem(noticeKey)) return;
       window.localStorage.setItem(noticeKey, "shown");
-      notify.success(
-        language === "ar" ? "اكتمل طلب العملاء!" : "Lead request completed!",
+      notify.warning(
+        language === "ar" ? "توقف البحث قبل اكتمال العدد" : "Search stopped before reaching your target",
         {
           description:
             language === "ar"
@@ -655,6 +661,8 @@ function ConsoleShell({
     );
   }, [leadWorkspace.error, leadWorkspace.job, settledLeadShortfall, language]);
   const generationLock = useRef(false);
+  const [activeLeadSessionJobId, setActiveLeadSessionJobId] = useState<string | null>(null);
+  const [startingLeadSearch, setStartingLeadSearch] = useState(false);
   const [researchingLeadId, setResearchingLeadId] = useState<string | null>(
     null,
   );
@@ -919,6 +927,7 @@ function ConsoleShell({
   function startNewChat() {
     if (busy) return;
     setActiveChatId(newChatId());
+    setActiveLeadSessionJobId(null);
     setChatInput("");
     setConsoleMessages([]);
     setDealIntent(null);
@@ -963,6 +972,7 @@ function ConsoleShell({
   function openChat(thread: ChatThread) {
     if (busy) return;
     setActiveChatId(thread.id);
+    setActiveLeadSessionJobId(null);
     setConsoleMessages(thread.messages);
     setIntake(thread.intake);
     setDealIntent(savedChatIntent(thread));
@@ -1180,10 +1190,12 @@ function ConsoleShell({
   ) {
     if (busy || generationLock.current || mission.confidence < 100) return;
     if (leadWorkspace.running) {
-      selectTab("leads");
+      selectTab("agent");
       return;
     }
     generationLock.current = true;
+    setStartingLeadSearch(true);
+    setLeadCountPickerOpen(false);
     setBusy(true);
     setActivityMode("thinking");
     try {
@@ -1212,6 +1224,7 @@ function ConsoleShell({
         Number(job.target_count || targetLeadCount),
       );
       leadWorkspace.acceptJob(job);
+      setActiveLeadSessionJobId(job.id);
       notify.success(
         language === "ar"
           ? "بدأت وصلة البحث عن عملائك."
@@ -1251,7 +1264,7 @@ function ConsoleShell({
           "wasla:first-request:" + user.id,
           "created",
         );
-      selectTab("leads");
+      selectTab("agent");
     } catch (error) {
       if (
         ["INSUFFICIENT_CREDITS", "INSUFFICIENT_CREDIT"].includes(
@@ -1280,6 +1293,7 @@ function ConsoleShell({
       }
       setLeadCountPickerOpen(true);
     } finally {
+      setStartingLeadSearch(false);
       generationLock.current = false;
       setBusy(false);
       setActivityMode("idle");
@@ -1698,6 +1712,10 @@ function ConsoleShell({
                   reasoningMode={chatReasoningMode}
                   selectedLeadType={selectedLeadType}
                   availableLeadTypes={availableLeadTypes}
+                  leadJob={startingLeadSearch ? null : leadWorkspace.job}
+                  leadStream={leadWorkspace.jobLeads}
+                  leadSourcing={startingLeadSearch || Boolean(activeLeadSessionJobId && leadWorkspace.job?.id === activeLeadSessionJobId && leadWorkspace.running)}
+                  leadPanelActive={startingLeadSearch || Boolean(activeLeadSessionJobId && leadWorkspace.job?.id === activeLeadSessionJobId)}
                   onInputChange={setChatInput}
                   intent={dealIntent}
                   onRun={(targetLeadCount) =>
@@ -2328,6 +2346,10 @@ function AgentMissionPage({
   reasoningMode,
   selectedLeadType,
   availableLeadTypes,
+  leadJob,
+  leadStream,
+  leadSourcing,
+  leadPanelActive,
   onInputChange,
   onRun,
   onLeadCountPickerChange,
@@ -2354,6 +2376,10 @@ function AgentMissionPage({
   reasoningMode: ChatReasoningMode | null;
   selectedLeadType: "b2c" | "b2b" | null;
   availableLeadTypes: Array<"b2b" | "b2c">;
+  leadJob: LeadJob | null;
+  leadStream: Lead[];
+  leadSourcing: boolean;
+  leadPanelActive: boolean;
   onInputChange: (value: string) => void;
   onRun: (targetLeadCount: number) => void;
   onLeadCountPickerChange: (open: boolean) => void;
@@ -2453,9 +2479,13 @@ function AgentMissionPage({
         </strong>
       </div>
 
-      <div
-        className={`ops-chat-stage${consoleMessages.length ? " has-conversation" : ""}`}
-      >
+      <div dir={language === "ar" ? "rtl" : "ltr"} className={`ops-chat-workspace${leadPanelActive ? " is-sourcing" : ""}`}>
+        {leadPanelActive ? (
+          <LiveLeadStream job={leadJob} leads={leadStream} language={language} />
+        ) : null}
+        <div
+          className={`ops-chat-stage${consoleMessages.length ? " has-conversation" : ""}`}
+        >
         {intent ? (
           <span className={`ops-intent-badge is-${intent ?? "sell"}`}>
             <i />
@@ -2608,10 +2638,10 @@ function AgentMissionPage({
             </div>
           ) : null}
 
-          {busy ? (
+          {busy || leadSourcing ? (
             <ResearchActivity
               language={language}
-              mode={activityMode}
+              mode={leadSourcing ? "sourcing" : activityMode}
               phase={researchPhase}
             />
           ) : null}
@@ -2789,8 +2819,80 @@ function AgentMissionPage({
             onChoose={(id) => onDirectionSelect(id as DealIntent)}
           />
         ) : null}
+        </div>
       </div>
     </section>
+  );
+}
+
+function LiveLeadStream({ job, leads, language }: { job: LeadJob | null; leads: Lead[]; language: "ar" | "en" }) {
+  const delivered = Math.max(0, Number(job?.result_count || leads.length));
+  const target = Math.max(delivered, Number(job?.target_count || 0));
+  const running = !job || !["completed", "failed", "error", "cancelled"].includes(job.status.toLowerCase());
+  const stats = job?.b2cCampaign?.stats;
+  const scanned = Number(stats?.postsFetched || 0);
+  const qualified = Number(stats?.candidatesQualified || 0);
+  const verified = Number(stats?.contactsResolved || 0);
+  const [visibleCount, setVisibleCount] = useState(0);
+  useEffect(() => {
+    if (!leads.length) {
+      setVisibleCount(0);
+      return;
+    }
+    if (visibleCount >= leads.length) return;
+    const timer = window.setTimeout(() => setVisibleCount((current) => Math.min(leads.length, current + 1)), 360);
+    return () => window.clearTimeout(timer);
+  }, [leads.length, visibleCount]);
+  const visibleLeads = leads.slice(0, Math.min(6, visibleCount));
+  const skeletons = running ? Math.min(4, Math.max(1, Math.min(target - visibleLeads.length, 4))) : 0;
+  const activity: { state: OrbState; label: string } = scanned === 0
+    ? { state: "breathing", label: language === "ar" ? "نبني أفضل مسارات البحث" : "Building the strongest search paths" }
+    : qualified === 0
+      ? { state: "searching", label: language === "ar" ? "نفحص إشارات الطلب الحية" : "Scanning live demand signals" }
+      : verified === 0
+        ? { state: "solving", label: language === "ar" ? "نراجع الملاءمة والاستبعادات" : "Checking fit and exclusions" }
+        : { state: "working", label: language === "ar" ? "نتحقق ونضيف العملاء واحداً تلو الآخر" : "Verifying and delivering leads one by one" };
+  const steps = [
+    { label: language === "ar" ? "فهم نية الشراء" : "Mapped buyer intent", done: scanned > 0 },
+    { label: language === "ar" ? "فحص إشارات الطلب" : "Scanned demand signals", done: qualified > 0, value: scanned },
+    { label: language === "ar" ? "تأكيد الملاءمة" : "Confirmed relevance", done: verified > 0, value: qualified },
+    { label: language === "ar" ? "التحقق من التواصل" : "Verified contact details", done: delivered > 0, value: verified },
+  ];
+  return (
+    <aside className="ops-live-leads" aria-live="polite">
+      <header>
+        <div>
+          <span className="ops-live-leads__orb"><ThinkingOrb state={activity.state} size={64} theme="dark" aria-label={activity.label} /></span>
+          <span><strong>{language === "ar" ? "العملاء يصلون الآن" : "Leads arriving now"}</strong><small>{activity.label}</small></span>
+        </div>
+        <span>{delivered} / {target}</span>
+      </header>
+      <div className="ops-live-leads__progress" aria-hidden="true"><i style={{ width: `${target ? Math.min(100, (delivered / target) * 100) : 0}%` }} /></div>
+      <ol className="ops-live-leads__trace">
+        {steps.map((step, index) => (
+          <li className={step.done ? "is-done" : index === steps.findIndex((item) => !item.done) ? "is-active" : ""} key={step.label}>
+            <i>{step.done ? "✓" : index + 1}</i><span>{step.label}</span>{step.value ? <b>{step.value.toLocaleString()}</b> : null}
+          </li>
+        ))}
+      </ol>
+      <div className="ops-live-leads__list">
+        {visibleLeads.map((lead) => (
+          <article className="ops-live-lead" key={lead.id}>
+            <span className="ops-live-lead__avatar">{(lead.name || lead.company || "L").slice(0, 1).toUpperCase()}</span>
+            <div><strong>{lead.name || lead.company}</strong><small>{lead.location || (language === "ar" ? "السعودية" : "Saudi Arabia")}</small></div>
+            <span className="ops-live-lead__contact">{lead.phone || (language === "ar" ? "تم التحقق" : "Verified")}</span>
+          </article>
+        ))}
+        {Array.from({ length: skeletons }, (_, index) => (
+          <div className="ops-live-lead is-skeleton" key={`lead-skeleton-${index}`} aria-hidden="true">
+            <span className="ops-live-lead__avatar" />
+            <div><i /><i /></div>
+            <i />
+          </div>
+        ))}
+      </div>
+      {running ? <p>{language === "ar" ? "نراجع الدليل ومعلومات التواصل قبل إضافة كل عميل." : "Evidence and contact details are checked before each lead appears."}</p> : null}
+    </aside>
   );
 }
 
@@ -3091,6 +3193,12 @@ function ResearchActivity({
           />
         </span>
         <strong>{activity.label}</strong>
+      </div>
+      <div className="research-activity__steps" role="status" aria-live="polite">
+        <p>{mode === "sourcing"
+          ? language === "ar" ? "أجهّز البحث وفق طلبك. ستظهر النتائج هنا بعد مراجعة ملاءمتها وبيانات التواصل." : "Preparing your search from your brief. Matches will appear here after relevance and contact checks."
+          : language === "ar" ? "أراجع عرضك والجمهور والموقع لأحدد الخطوة التالية. عندما يصبح الطلب جاهزاً، ستختار عدد العملاء هنا." : "Reviewing your offer, audience, and location to determine the next step. Once your brief is ready, you’ll choose your lead count here."}</p>
+        <small>{mode === "sourcing" ? language === "ar" ? "التالي: البحث عن المرشحين ← مراجعة الملاءمة ← التحقق من التواصل" : "Next: find candidates → review relevance → verify contact details" : language === "ar" ? "التالي: توضيح التفاصيل أو تجهيز خيارات العدد" : "Next: clarify any missing details or prepare your quantity choices"}</small>
       </div>
     </div>
   );

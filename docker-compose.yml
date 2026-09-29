@@ -51,6 +51,8 @@ services:
       WEBSOCKETS_ENABLED: "true"
       AUTH_GOOGLE_ISSUER_DISCOVERY_MUST_SUCCEED: "false"
       WASLAH_CUSTOMER_ROLE_ID: "${WASLAH_CUSTOMER_ROLE_ID:-8c62f1c4-258c-4d77-92f2-33f87db31765}"
+      OPENROUTER_API_KEY: "${OPEN_ROUTER_TOKEN:-}"
+      B2C_OPENROUTER_MODEL: "${B2C_OPENROUTER_MODEL:-openai/gpt-4o-mini}"
     volumes:
       - directus_uploads:/directus/uploads
       - ./directus/extensions:/directus/extensions

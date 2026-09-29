@@ -358,7 +358,7 @@
   --ops-text: #f2f3f3;
   --ops-muted: #92979e;
   --ops-subtle: #696e75;
-  --ops-green: #43d17b;
+  --ops-green: #ffff51;
   --ops-blue: #6ea8fe;
   --ops-amber: #e5b85c;
   background: var(--ops-bg);
@@ -436,7 +436,7 @@
 #root .ops-system__services i {
   background: var(--ops-green);
   border-radius: 50%;
-  box-shadow: 0 0 0 3px rgba(67, 209, 123, 0.12);
+  box-shadow: 0 0 0 3px rgba(255, 255, 81, 0.12);
   display: inline-block;
   height: 6px;
   width: 6px;
@@ -498,7 +498,7 @@
 
 #root .hconsole-context span svg {
   color: var(--ops-green);
-  fill: rgba(67, 209, 123, 0.18);
+  fill: rgba(255, 255, 81, 0.18);
 }
 #root .hconsole-context strong {
   font-size: 14px;

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { Lead } from "../types";
-import { apiErrorMessage, fetchLeadJob, fetchLeadJobs, fetchWorkspaceLeads, getAccount, isLeadJobRunning } from "./directus";
+import { apiErrorMessage, fetchLeadJob, fetchLeadJobs, fetchLeadRunLeads, fetchWorkspaceLeads, getAccount, isLeadJobRunning } from "./directus";
 import type { LeadJob } from "./directus";
 
 const STALE_JOB_MS = 30 * 60 * 1000;
@@ -22,6 +22,7 @@ function settledJob(job: LeadJob | null): { job: LeadJob | null; error: string }
 
 export function useLeadWorkspace(userId: string | undefined, initialCredits: number, setLeads: Dispatch<SetStateAction<Lead[]>>) {
   const [job, setJob] = useState<LeadJob | null>(null);
+  const [jobLeads, setJobLeads] = useState<Lead[]>([]);
   const [credits, setCredits] = useState(initialCredits);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -38,6 +39,7 @@ export function useLeadWorkspace(userId: string | undefined, initialCredits: num
   useEffect(() => {
     jobRef.current = null;
     setJob(null);
+    setJobLeads([]);
     setError("");
     setLoading(true);
   }, [userId]);
@@ -56,9 +58,14 @@ export function useLeadWorkspace(userId: string | undefined, initialCredits: num
         const state = settledJob(fetched);
         const current = state.job;
         // Fetch inventory after status so a completed job always includes its committed results.
-        const [items, account] = await Promise.all([fetchWorkspaceLeads(), getAccount()]);
+        const [items, account, currentJobLeads] = await Promise.all([
+          fetchWorkspaceLeads(),
+          getAccount(),
+          current ? fetchLeadRunLeads(current.id) : Promise.resolve([]),
+        ]);
         if (cancelled) return;
         setLeads(items);
+        setJobLeads(currentJobLeads);
         setCredits(Math.floor(account.wallet.balance * 10));
         jobRef.current = current;
         setJob(current);
@@ -81,5 +88,5 @@ export function useLeadWorkspace(userId: string | undefined, initialCredits: num
     return () => { cancelled = true; clearTimeout(timer); window.removeEventListener("focus", onFocus); };
   }, [userId, revision, setLeads, refresh]);
 
-  return { job, credits, setCredits, loading, error, refresh, acceptJob, running: isLeadJobRunning(job) };
+  return { job, jobLeads, credits, setCredits, loading, error, refresh, acceptJob, running: isLeadJobRunning(job) };
 }

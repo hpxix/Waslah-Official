@@ -366,7 +366,6 @@ export function CoreLeadsWorkspace({
   language,
   job,
   loading,
-  error,
   focusedLeadId,
   researchingLeadId,
   onRefresh,
@@ -542,36 +541,8 @@ export function CoreLeadsWorkspace({
           {ar ? "العودة للمحادثة" : "Back to chat"}
         </Button>
       </header>
-      {activelySearching && job ? (
-        <div className="core-run is-running">
-          <LoaderCircle className="is-spinning" size={20} />
-          <div>
-            <strong>
-              {ar
-                ? "البحث جارٍ — ستظهر النتائج تلقائياً"
-                : "Search in progress — results will appear automatically"}
-            </strong>
-            <p>
-              {job.result_count} / {job.target_count}
-            </p>
-            <small>
-              {ar
-                ? "يمكنك متابعة المحادثة أو الرجوع لاحقاً."
-                : "You can keep chatting or return later."}
-            </small>
-          </div>
-        </div>
-      ) : null}
       <B2CJourney job={job} language={language} />
       {!activelySearching ? <LeadKpis leads={leads} ar={ar} /> : null}
-      {error ? (
-        <div className="core-leads__error">
-          <span>{error}</span>
-          <Button onClick={onRefresh}>
-            {ar ? "حاول مجدداً" : "Try again"}
-          </Button>
-        </div>
-      ) : null}
       <div className="core-leads__surface">
         <div className="core-leads__toolbar">
           <div className="core-leads__filters">

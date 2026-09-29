@@ -168,6 +168,27 @@ export type AdminMemory = {
   updated_at: string;
 };
 
+export type AdminIntelligenceMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+export type AdminIntelligenceResponse = {
+  text: string;
+  scope: {
+    type: "account" | "all_accounts";
+    account?: Pick<AdminAccount, "user_id" | "email" | "first_name" | "last_name" | "organization_id" | "organization_name">;
+  };
+  evidence: {
+    accounts: number;
+    b2c_campaigns: number;
+    pages_fetched: number;
+    requested_leads: number;
+    delivered_leads: number;
+    completion_rate: number;
+  };
+};
+
 export type AdminB2CCampaign = {
   id: string;
   request_id: string;
@@ -271,6 +292,10 @@ export type B2CCampaign = {
     maxAds?: number;
     nextPage?: number;
     searchPass?: number;
+    contactAttempts?: number;
+    activeStrategyPhase?: string | null;
+    fastPrefilterRejected?: number;
+    executionLedger?: Array<{ code?: string; query?: string; phase?: string; returned?: number; shortlisted?: number; qualified?: number }>;
   };
   explanation: B2CExplanation;
   errorMessage: string | null;
@@ -644,6 +669,14 @@ export function fetchCapabilities() {
 
 export function fetchAdminAccounts() {
   return authenticatedRequest<AdminAccount[]>("get", `${leadAgentPath}/admin/accounts`);
+}
+
+export function askAdminIntelligence(message: string, transcript: AdminIntelligenceMessage[], account?: string) {
+  return authenticatedRequest<AdminIntelligenceResponse>("post", `${leadAgentPath}/admin/chat`, {
+    message,
+    transcript,
+    account: account || undefined,
+  });
 }
 
 export function fetchAdminFeatures(account?: string) {

@@ -19,14 +19,15 @@ import {
   updateAdminProvider,
 } from "../lib/directus";
 import type { AdminAccount, AdminB2CActivity, AdminB2CCampaign, AdminB2CLeadEvidence, AdminChatLog, AdminFeature, AdminMemory, AdminProvider } from "../lib/directus";
+import { AdminIntelligenceChat } from "./AdminIntelligenceChat";
 import "./admin-control.css";
 import "./admin-ready-brief.css";
 
-type Section = "access" | "accounts" | "providers" | "conversations" | "memory" | "sourcing";
+type Section = "intelligence" | "access" | "accounts" | "providers" | "conversations" | "memory" | "sourcing";
 
 export function AdminControlCenter({ language }: { language: "ar" | "en" }) {
   const ar = language === "ar";
-  const [section, setSection] = useState<Section>("access");
+  const [section, setSection] = useState<Section>("intelligence");
   const [loading, setLoading] = useState(true);
   const [accounts, setAccounts] = useState<AdminAccount[]>([]);
   const [features, setFeatures] = useState<AdminFeature[]>([]);
@@ -136,6 +137,7 @@ export function AdminControlCenter({ language }: { language: "ar" | "en" }) {
   }
 
   const nav: Array<{ key: Section; label: string; icon: typeof ShieldCheck }> = [
+    { key: "intelligence", label: ar ? "محادثة الإدارة" : "Admin intelligence", icon: Bot },
     { key: "access", label: ar ? "الوصول والميزات" : "Access & features", icon: ShieldCheck },
     { key: "accounts", label: ar ? "الحسابات والأرصدة" : "Accounts & credits", icon: Users },
     { key: "providers", label: ar ? "مصادر العملاء" : "Sourcing routes", icon: DatabaseZap },
@@ -148,6 +150,8 @@ export function AdminControlCenter({ language }: { language: "ar" | "en" }) {
     <header className="admin-control__hero"><div><span><ShieldCheck size={14}/>{ar ? "مركز تحكم وصلة" : "WASLA CONTROL PLANE"}</span><h1>{ar ? "تحكم كامل. أثر فوري." : "Control every account. Instantly."}</h1><p>{ar ? "ميزات، أرصدة، مصادر، محادثات وذاكرة الأعمال من مساحة واحدة." : "Feature access, credits, sourcing, conversations and learned business context in one place."}</p></div><button onClick={() => void load()} disabled={loading}><RefreshCw size={16} className={loading ? "is-spinning" : ""}/>{ar ? "تحديث" : "Refresh"}</button></header>
     <div className="admin-control__stats"><Metric icon={Users} label={ar ? "الحسابات" : "Accounts"} value={accounts.length}/><Metric icon={Activity} label={ar ? "محادثات مسجلة" : "Logged conversations"} value={logs.length}/><Metric icon={DatabaseZap} label={ar ? "مسارات نشطة" : "Active routes"} value={providers.filter((item) => item.enabled).length}/><Metric icon={Building2} label={ar ? "حملات B2C" : "B2C campaigns"} value={campaigns.length}/></div>
     <nav className="admin-control__nav">{nav.map(({ key, label, icon: Icon }) => <button key={key} className={section === key ? "is-active" : ""} onClick={() => setSection(key)}><Icon size={16}/>{label}</button>)}</nav>
+
+    {section === "intelligence" && <AdminIntelligenceChat accounts={accounts} language={language}/>}
 
     {section === "access" && <section className="admin-control__panel"><PanelHead title={ar ? "الوصول للمنتج" : "Product access"} body={ar ? "المفتاح العام يطبق على الجميع؛ إعداد الحساب يتغلب عليه فوراً." : "Global policy applies to everyone; an account override wins immediately."}/><div className="admin-feature-grid">{features.map((feature) => <article key={feature.key}><div><i className={feature.enabled_global ? "is-on" : ""}/><span><strong>{feature.name}</strong><small>{feature.description || feature.key}</small></span></div><button className={`admin-switch ${feature.enabled_global ? "is-on" : ""}`} onClick={() => void toggleGlobal(feature)} disabled={busyKey === feature.key} aria-label={`Toggle ${feature.name}`}><span/></button></article>)}</div><AccountPicker accounts={accounts} value={selectedAccount} onChange={inspectAccount} ar={ar}/>{selectedAccount && <div className="admin-overrides"><div><strong>{ar ? "تجاوزات هذا الحساب" : "Account overrides"}</strong><small>{ar ? "اختر موروث، متاح أو محظور." : "Choose inherited, enabled, or disabled."}</small></div>{accountFeatures.map((feature) => <article key={feature.key}><span><strong>{feature.name}</strong><small>{feature.overridden ? (ar ? "إعداد خاص" : "Account override") : (ar ? "موروث من العام" : "Inherited globally")}</small></span><select value={feature.overridden ? String(feature.enabled) : "inherit"} disabled={busyKey === `override:${feature.key}`} onChange={(event) => void setOverride(feature, event.target.value === "inherit" ? null : event.target.value === "true")}><option value="inherit">{ar ? "موروث" : "Inherit"}</option><option value="true">{ar ? "متاح" : "Enabled"}</option><option value="false">{ar ? "محظور" : "Disabled"}</option></select></article>)}</div>}</section>}
 

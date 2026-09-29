@@ -1,4 +1,4 @@
-import { Toast } from "@heroui/react";
+import { toast } from "sonner";
 import type { ReactNode } from "react";
 
 type NoticeOptions = {
@@ -11,28 +11,27 @@ type NoticeOptions = {
 function optionsFor(options: NoticeOptions = {}) {
   return {
     description: options.description,
-    timeout: options.timeout,
-    isLoading: options.loading,
-    actionProps: options.action
-      ? { children: options.action.label, onPress: options.action.onAction }
+    duration: options.timeout ?? 4500,
+    action: options.action
+      ? { label: options.action.label, onClick: options.action.onAction }
       : undefined,
   };
 }
 
 export const notify = {
   success(message: ReactNode, options?: NoticeOptions) {
-    return Toast.toast.success(message, optionsFor(options));
+    return toast.success(message, optionsFor(options));
   },
   danger(message: ReactNode, options?: NoticeOptions) {
-    return Toast.toast.danger(message, optionsFor(options));
+    return toast.error(message, optionsFor(options));
   },
   info(message: ReactNode, options?: NoticeOptions) {
-    return Toast.toast.info(message, optionsFor(options));
+    return toast.info(message, optionsFor(options));
   },
   warning(message: ReactNode, options?: NoticeOptions) {
-    return Toast.toast.warning(message, optionsFor(options));
+    return toast.warning(message, optionsFor(options));
   },
-  close(id: string) {
-    Toast.toast.close(id);
+  close(id: string | number) {
+    toast.dismiss(id);
   },
 };

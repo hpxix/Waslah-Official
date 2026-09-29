@@ -1,4 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+
+const STRATEGIST_VERSION = "wasla-saudi-lead-search-strategist-v1";
+const STRATEGIST_SNAPSHOT = readFileSync(
+  new URL("./prompts/wasla_saudi_lead_search_strategist.v1.md", import.meta.url),
+  "utf8",
+);
 
 const SEARCH_QUERY = `query Search($search: String!, $cities: [String], $page: Int, $limit: Int) {
   search(search: $search, cities: $cities, page: $page, limit: $limit) {
@@ -67,25 +74,56 @@ function responseText(payload) {
 }
 
 async function structuredResponse(env, name, schema, instructions, input, maxOutputTokens = 2200, reasoningEffort = "low") {
-  if (!env.OPENAI_API_KEY) return null;
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: env.B2C_OPENAI_MODEL || env.OPENAI_CHAT_MODEL || "gpt-5.6-terra",
-      instructions,
-      input: JSON.stringify(input),
-      text: { format: { type: "json_schema", name, strict: true, schema } },
-      reasoning: { effort: reasoningEffort },
-      max_output_tokens: maxOutputTokens,
-      store: false,
-    }),
-    signal: AbortSignal.timeout(numeric(env.B2C_AI_TIMEOUT_MS, 55_000, 5_000, 120_000)),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload?.error?.message || `OpenAI returned ${response.status}`);
-  const text = responseText(payload);
-  return text ? JSON.parse(text) : null;
+  const timeoutMs = numeric(env.B2C_AI_TIMEOUT_MS, 55_000, 5_000, 120_000);
+  let primaryError = null;
+  if (env.OPENAI_API_KEY) {
+    try {
+      const response = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: env.B2C_OPENAI_MODEL || env.OPENAI_CHAT_MODEL || "gpt-5.6-terra",
+          instructions,
+          input: JSON.stringify(input),
+          text: { format: { type: "json_schema", name, strict: true, schema } },
+          reasoning: { effort: reasoningEffort },
+          max_output_tokens: maxOutputTokens,
+          store: false,
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error?.message || `Primary AI returned ${response.status}`);
+      const text = responseText(payload);
+      return text ? JSON.parse(text) : null;
+    } catch (error) {
+      primaryError = error;
+    }
+  }
+  const openRouterKey = env.OPENROUTER_API_KEY || env.OPEN_ROUTER_TOKEN;
+  if (openRouterKey) {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${openRouterKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: env.B2C_OPENROUTER_MODEL || env.OPENROUTER_MODEL || "openai/gpt-4o-mini",
+        messages: [
+          { role: "system", content: instructions },
+          { role: "user", content: JSON.stringify(input) },
+        ],
+        response_format: { type: "json_schema", json_schema: { name, strict: true, schema } },
+        max_tokens: maxOutputTokens,
+        temperature: 0,
+      }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload?.error?.message || `Fallback AI returned ${response.status}`);
+    const text = payload?.choices?.[0]?.message?.content;
+    return text ? JSON.parse(text) : null;
+  }
+  if (primaryError) throw primaryError;
+  return null;
 }
 
 const GENERIC_INTENT_TOKENS = new Set([
@@ -98,6 +136,23 @@ const GENERIC_INTENT_TOKENS = new Set([
 
 function meaningfulTokens(input) {
   return tokens(input).filter((token) => token.length > 2 && !GENERIC_INTENT_TOKENS.has(token));
+}
+
+const BUYER_INTENT_TOKENS = new Set([
+  "ابي", "ابغي", "مطلوب", "احتاج", "ادور", "اريد", "طلب", "ابحث",
+  "wanted", "want", "need", "needed", "looking", "searching", "buy", "buying",
+]);
+
+function strategyAnchorTokens(candidate) {
+  return meaningfulTokens(candidate?.matchedStrategy?.searchTerm || candidate?.matchedStrategy?.query)
+    .filter((token) => !BUYER_INTENT_TOKENS.has(token));
+}
+
+function hasStrategyAnchor(candidate) {
+  const anchors = strategyAnchorTokens(candidate);
+  if (!anchors.length) return false;
+  const content = normalizeText(`${candidate.title} ${candidate.bodyText}`);
+  return anchors.some((token) => content.includes(token));
 }
 
 function cityList(input) {
@@ -202,25 +257,58 @@ export async function createLeadIntent(env, prompt) {
         : "Extract a grounded B2C lead intent for Saudi Arabia. Model buyer profiles through observable marketplace behavior. Never infer sensitive or unsupported personal facts. The buyerType must be B2C. Weights are 0-100. Return only the schema.",
       { customer_request: prompt, default_market: "Saudi Arabia" },
     );
-    // The model's grounded interpretation is authoritative. Execution reduces
-    // it to one concrete Saudi-Arabic product expression in the next step.
+    // The model's grounded interpretation is authoritative. The versioned
+    // strategist converts it into phased, evidence-led Saudi search paths.
     return sanitizeIntent(result, fallback);
   } catch {
     return fallback;
   }
 }
 
-const searchPhraseSchema = {
-  type: "object", additionalProperties: false, required: ["queries"],
+const strategistQuerySchema = {
+  type: "object", additionalProperties: false,
+  required: ["query", "signal", "lead_hypothesis", "priority"],
   properties: {
-    queries: {
-      type: "array", minItems: 1, maxItems: 1,
-      items: {
-        type: "object", additionalProperties: false,
-        required: ["term", "englishTerm", "reason"],
-        properties: {
-          term: { type: "string" }, englishTerm: { type: "string" }, reason: { type: "string" },
-        },
+    query: { type: "string" },
+    signal: { type: "string" },
+    lead_hypothesis: { type: "string" },
+    priority: { type: "string", enum: ["high", "medium", "low"] },
+  },
+};
+
+const strategistPhaseSchema = {
+  type: "object", additionalProperties: false,
+  required: ["type", "reason", "queries"],
+  properties: {
+    type: { type: "string" },
+    reason: { type: "string" },
+    queries: { type: "array", minItems: 1, maxItems: 4, items: strategistQuerySchema },
+  },
+};
+
+const strategistPlanSchema = {
+  type: "object", additionalProperties: false,
+  required: ["market_understanding", "primary_strategy", "fallback_strategies", "negative_signals", "qualification_instructions"],
+  properties: {
+    market_understanding: {
+      type: "object", additionalProperties: false,
+      required: ["customer_offer", "likely_buyers", "primary_lead_logic"],
+      properties: {
+        customer_offer: { type: "string" },
+        likely_buyers: { type: "array", minItems: 1, maxItems: 8, items: { type: "string" } },
+        primary_lead_logic: { type: "string" },
+      },
+    },
+    primary_strategy: strategistPhaseSchema,
+    fallback_strategies: { type: "array", maxItems: 3, items: strategistPhaseSchema },
+    negative_signals: { type: "array", maxItems: 12, items: { type: "string" } },
+    qualification_instructions: {
+      type: "object", additionalProperties: false,
+      required: ["strong_lead", "possible_lead", "reject"],
+      properties: {
+        strong_lead: { type: "string" },
+        possible_lead: { type: "string" },
+        reject: { type: "string" },
       },
     },
   },
@@ -240,33 +328,95 @@ function knownSaudiSearchTerm(prompt) {
   return arabicTokens.length ? { term: arabicTokens.join(" "), englishTerm: "" } : null;
 }
 
-function fallbackSearchPhrases(prompt, intent) {
+function fallbackStrategistPlan(prompt, intent, procurement) {
   const chosen = knownSaudiSearchTerm(`${prompt} ${intent.productName}`);
-  if (!chosen) return [];
-  return [{
-    ...chosen,
-    reason: "The one Saudi-market product expression shared across the customer's selling or buying context.",
-  }];
+  const term = chosen?.term || intent.productName;
+  const query = procurement ? term : `مطلوب ${term}`.trim();
+  return {
+    market_understanding: {
+      customer_offer: intent.productName,
+      likely_buyers: intent.idealCustomerProfiles.map((item) => item.name).slice(0, 6),
+      primary_lead_logic: procurement
+        ? "Find credible owners actively offering the requested item."
+        : "Find advertisements that express observable demand for the customer's offer.",
+    },
+    primary_strategy: {
+      type: "DIRECT_PURCHASE_INTENT",
+      reason: "Safe degraded-mode strategy when the AI strategist is unavailable.",
+      queries: [{
+        query,
+        signal: procurement ? "active offer" : "expressed purchase intent",
+        lead_hypothesis: procurement
+          ? "The advertiser may own and be offering the requested item."
+          : "The advertiser may be actively looking for the customer's offer.",
+        priority: "high",
+      }],
+    },
+    fallback_strategies: [],
+    negative_signals: intent.negativeSignals.map((item) => item.signal),
+    qualification_instructions: {
+      strong_lead: "The full advertisement provides direct evidence supporting the lead hypothesis.",
+      possible_lead: "The advertisement provides plausible but incomplete evidence and needs a second-pass review.",
+      reject: "Reject competitors, irrelevant sellers, completed needs, duplicates, and speculative matches.",
+    },
+  };
 }
 
-async function createSearchPhrases(env, prompt, intent, procurement) {
-  const fallback = fallbackSearchPhrases(prompt, intent);
+function sanitizeStrategistPlan(value, fallback) {
+  if (!value || typeof value !== "object") return fallback;
+  const seen = new Set();
+  const sanitizePhase = (phase, index) => {
+    const queries = (Array.isArray(phase?.queries) ? phase.queries : [])
+      .map((item) => ({
+        query: String(item?.query || "").trim().slice(0, 80),
+        signal: String(item?.signal || "").trim().slice(0, 240),
+        lead_hypothesis: String(item?.lead_hypothesis || "").trim().slice(0, 600),
+        priority: ["high", "medium", "low"].includes(item?.priority) ? item.priority : index === 0 ? "high" : "medium",
+      }))
+      .filter((item) => item.query && meaningfulTokens(item.query).length <= 6 && !seen.has(normalizeText(item.query)) && seen.add(normalizeText(item.query)))
+      .slice(0, 4);
+    if (!queries.length) return null;
+    return {
+      type: String(phase?.type || "ADJACENT_BEHAVIOR").slice(0, 80),
+      reason: String(phase?.reason || "").slice(0, 600),
+      queries,
+    };
+  };
+  const primary = sanitizePhase(value.primary_strategy, 0);
+  if (!primary) return fallback;
+  return {
+    market_understanding: {
+      customer_offer: String(value.market_understanding?.customer_offer || fallback.market_understanding.customer_offer).slice(0, 300),
+      likely_buyers: (Array.isArray(value.market_understanding?.likely_buyers) ? value.market_understanding.likely_buyers : fallback.market_understanding.likely_buyers).map(String).slice(0, 8),
+      primary_lead_logic: String(value.market_understanding?.primary_lead_logic || fallback.market_understanding.primary_lead_logic).slice(0, 800),
+    },
+    primary_strategy: primary,
+    fallback_strategies: (Array.isArray(value.fallback_strategies) ? value.fallback_strategies : [])
+      .map((phase, index) => sanitizePhase(phase, index + 1))
+      .filter(Boolean)
+      .slice(0, 3),
+    negative_signals: (Array.isArray(value.negative_signals) ? value.negative_signals : fallback.negative_signals).map(String).slice(0, 12),
+    qualification_instructions: {
+      strong_lead: String(value.qualification_instructions?.strong_lead || fallback.qualification_instructions.strong_lead).slice(0, 800),
+      possible_lead: String(value.qualification_instructions?.possible_lead || fallback.qualification_instructions.possible_lead).slice(0, 800),
+      reject: String(value.qualification_instructions?.reject || fallback.qualification_instructions.reject).slice(0, 800),
+    },
+  };
+}
+
+async function createStrategistPlan(env, prompt, intent, procurement) {
+  const fallback = fallbackStrategistPlan(prompt, intent, procurement);
   try {
     const result = await structuredResponse(
       env,
-      "waslah_b2c_search_phrases",
-      searchPhraseSchema,
-      `Understand exactly what the customer is selling or buying and return exactly ONE concise Saudi-market Arabic search expression. It must be the common product word an ordinary Saudi advertiser puts in a title, written in Arabic or Saudi transliteration. Preserve a model or version when it identifies the product: iPhone 18 becomes ايفون 18. A PC shop becomes كمبيوتر. Return an English equivalent in englishTerm only for strict title matching; the actual search term must remain Arabic. Use one product expression of at most three short tokens, never a persona, profession, sentence, broad industry, tag, category, synonym list, or marketing phrase. Never mention any platform, API, provider, scraping, tag, or category. Return only the schema.`,
-      { customer_request: prompt, offer: intent },
-      1400,
+      "waslah_saudi_lead_search_strategy",
+      strategistPlanSchema,
+      `${STRATEGIST_SNAPSHOT}\n\nApply this versioned strategy exactly. Return only the required JSON. For procurement, leads are credible owners or sellers. For sales, prioritize evidence of demand and reject competitors selling the same offer. Queries must be short, natural Saudi Arabic search concepts, not essays. Do not expose the sourcing platform or implementation to the customer.`,
+      { customer_request: prompt, offer: intent, direction: procurement ? "buy" : "sell", strategist_version: STRATEGIST_VERSION },
+      3600,
+      "high",
     );
-    const seen = new Set();
-    const queries = (Array.isArray(result?.queries) ? result.queries : []).map((item) => ({
-      term: String(item.term || "").trim().slice(0, 80),
-      englishTerm: String(item.englishTerm || "").trim().slice(0, 80),
-      reason: String(item.reason || "").slice(0, 500),
-    })).filter((item) => item.term && /\p{Script=Arabic}/u.test(item.term) && meaningfulTokens(item.term).length <= 3 && !seen.has(normalizeText(item.term)) && seen.add(normalizeText(item.term)));
-    return queries.length === 1 ? queries : fallback;
+    return sanitizeStrategistPlan(result, fallback);
   } catch {
     return fallback;
   }
@@ -310,7 +460,7 @@ export async function createB2CDiscoveryTurn(env, { message, transcript = [], la
   let result = null;
   try {
     result = await structuredResponse(env, "waslah_b2c_discovery", discoverySchema,
-      `You are Wasla's premium conversational growth strategist. ${modeInstructions} Keep discovery concise and commercially useful. Learn only what materially improves this lead campaign: the exact product or service, whether the user is buying or selling, geography, model or version when relevant, and important exclusions. The execution method is one Saudi-Arabic product expression searched across advertisement titles, so the brief must identify one concrete product expression rather than a category tree or audience taxonomy. Never ask how many customers the user already has, whether they have a customer or lead list, whether they want to retarget existing customers, or request their customer data. Be curious, commercially sharp, and natural—not a form or technical planning screen. Preserve all earlier facts, never repeat a question, and ask one highest-impact question per turn. Format longer replies with concise Markdown bullets and put the next question on its own final line. Never mention or imply any platform, marketplace, API, data provider, category database, scraping method, tag, schema, path, or internal implementation. If the user delegates a choice, make a concrete recommendation and advance. Mark ready when the exact product expression, direction, and geography are understood. Reply in ${language === "ar" ? "Arabic" : "English"}. Return only the schema.`,
+      `You are Wasla's premium conversational growth strategist. ${modeInstructions} Keep discovery concise and commercially useful. Learn only what materially improves this lead campaign: the exact product or service, whether the user is buying or selling, geography, model or version when relevant, and important exclusions. The execution strategist will translate the brief into buyer-signal searches and a fallback ladder, so establish the business logic and observable evidence of need—not merely a product keyword. Never ask how many customers the user already has, whether they have a customer or lead list, whether they want to retarget existing customers, or request their customer data. Be curious, commercially sharp, and natural—not a form or technical planning screen. Preserve all earlier facts, never repeat a question, and ask one highest-impact question per turn. Format longer replies with concise Markdown bullets and put the next question on its own final line. Never mention or imply any platform, marketplace, API, data provider, category database, scraping method, tag, schema, path, or internal implementation. If the user delegates a choice, make a concrete recommendation and advance. Mark ready when the offer, direction, geography, and strongest likely demand signal are understood. Reply in ${language === "ar" ? "Arabic" : "English"}. Return only the schema.`,
       { latest_message: message, conversation: cleanTranscript, deal_intent: dealIntent, business_context: businessContext }, 1800, reasoningMode === "high" ? "high" : "low");
   } catch { result = null; }
   if (!result) {
@@ -331,19 +481,23 @@ export async function createB2CDiscoveryTurn(env, { message, transcript = [], la
   return { reply, ready, summary: String(result.summary || conversationText).slice(0, 2000), missing: fastFinalTurn ? [] : (Array.isArray(result.missing) ? result.missing : []).map(String).slice(0, 5), knownFacts: (Array.isArray(result.knownFacts) ? result.knownFacts : []).map(String).slice(0, 30), answeredTopics: (Array.isArray(result.answeredTopics) ? result.answeredTopics : []).map(String).slice(0, 20), confidence: fastFinalTurn ? Math.max(78, numeric(result.confidence, 55)) : numeric(Number(result.confidence) > 0 && Number(result.confidence) <= 1 ? Number(result.confidence) * 100 : result.confidence, 55) };
 }
 
-function strategiesFromSearchPhrases(phrases, intent, procurement) {
-  return (phrases || []).map((phrase) => ({
-    query: phrase.term,
+function strategiesFromStrategistPhase(phase, intent, procurement, phaseName, phaseIndex) {
+  return (phase?.queries || []).map((item) => ({
+    query: item.query,
     sourceMode: "search",
-    phase: "primary",
-    searchTerm: phrase.term,
-    englishTerm: phrase.englishTerm || "",
-    strategyType: procurement ? "DIRECT_INTENT" : "BEHAVIORAL_PROXY",
-    weight: 1,
-    requiresKeywordMatch: true,
+    phase: phaseName,
+    phaseIndex,
+    searchTerm: item.query,
+    englishTerm: "",
+    strategyType: String(phase.type || (procurement ? "ACTIVE_OFFER" : "DIRECT_PURCHASE_INTENT")),
+    weight: item.priority === "high" ? 1 : item.priority === "medium" ? 0.8 : 0.6,
+    requiresKeywordMatch: false,
     cities: intent.market.cities,
-    reason: phrase.reason,
-    pathId: `search-${createHash("sha1").update(normalizeText(phrase.term)).digest("hex").slice(0, 12)}`,
+    reason: item.lead_hypothesis || phase.reason,
+    signal: item.signal,
+    leadHypothesis: item.lead_hypothesis,
+    priority: item.priority,
+    pathId: `search-${phaseIndex}-${createHash("sha1").update(normalizeText(item.query)).digest("hex").slice(0, 12)}`,
     advertiserRole: procurement ? "An individual publicly offering the requested item" : "A person whose public activity indicates a plausible need for the customer's offer",
   }));
 }
@@ -351,19 +505,36 @@ function strategiesFromSearchPhrases(phrases, intent, procurement) {
 export async function createB2CPlan(env, prompt) {
   const procurement = /\[PROCUREMENT_FROM_CONSUMERS\]/.test(prompt);
   const intent = await createLeadIntent(env, prompt);
-  const searchPhrases = await createSearchPhrases(env, prompt, intent, procurement);
-  const queryStrategies = strategiesFromSearchPhrases(searchPhrases, intent, procurement)
-    .map((strategy) => ({ ...strategy, phase: "primary" }));
+  const strategistPlan = await createStrategistPlan(env, prompt, intent, procurement);
+  const phases = [strategistPlan.primary_strategy, ...strategistPlan.fallback_strategies];
+  const queryStrategies = phases.flatMap((phase, phaseIndex) => strategiesFromStrategistPhase(
+    phase,
+    intent,
+    procurement,
+    phaseIndex === 0 ? "primary" : `fallback-${phaseIndex}`,
+    phaseIndex,
+  ));
+  const searchPhrases = queryStrategies.map((strategy) => ({
+    term: strategy.searchTerm,
+    reason: strategy.reason,
+    signal: strategy.signal,
+    phase: strategy.phase,
+  }));
   return {
     intent,
     acquisitionPlan: {
       product: intent.productName,
       dealIntent: procurement ? "buy" : "sell",
       targetProfiles: intent.idealCustomerProfiles.map((profile) => profile.name),
+      strategistVersion: STRATEGIST_VERSION,
+      marketUnderstanding: strategistPlan.market_understanding,
+      strategyPlan: strategistPlan,
       searchPhrases,
-      searchStrategyVersion: 5,
-      sourceViability: "query_only",
+      searchStrategyVersion: 6,
+      sourceViability: "strategist_queries_with_ai_qualification",
       strategies: queryStrategies,
+      negativeSignals: strategistPlan.negative_signals,
+      qualificationInstructions: strategistPlan.qualification_instructions,
       qualification: {
         minimumLeadScore: numeric(env.B2C_MINIMUM_LEAD_SCORE, 65),
         minimumIdentityConfidence: numeric(env.B2C_MINIMUM_IDENTITY_CONFIDENCE, 60),
@@ -464,6 +635,8 @@ function normalizeCandidate(post, strategy) {
       pathId: strategy.pathId,
       strategyType: strategy.strategyType,
       weight: strategy.weight,
+      signal: strategy.signal || null,
+      leadHypothesis: strategy.leadHypothesis || strategy.reason || null,
       sourceMode: "search",
     },
   };
@@ -479,39 +652,150 @@ function recencyScore(timestamp) {
 export function scoreB2CCandidate(candidate, plan) {
   const strategy = plan.strategies.find((item) => item.pathId === candidate.matchedStrategy.pathId)
     || candidate.matchedStrategy;
-  const normalizedTitle = normalizeText(candidate.title);
-  const variants = [strategy.searchTerm || strategy.query, strategy.englishTerm]
-    .map(normalizeText)
-    .filter(Boolean);
-  const matchedSignals = [...new Set(variants.filter((phrase) => normalizedTitle.includes(phrase)))];
-  const titleMatched = matchedSignals.length > 0;
+  const normalizedContent = normalizeText(`${candidate.title} ${candidate.bodyText}`);
+  const query = normalizeText(strategy.searchTerm || strategy.query);
+  const queryTokens = meaningfulTokens(query);
+  const matchedSignals = queryTokens.filter((token) => normalizedContent.includes(token));
+  const directNeed = /(?:مطلوب|ابي|أبي|ابغى|أبغى|احتاج|أحتاج|ادور|أدور|خربان|عطل|مشكلة|توضيب|افتتاح|جديد|wanted|need|looking for|broken|problem)/i.test(`${candidate.title} ${candidate.bodyText}`);
+  const sellerLanguage = /(?:للبيع|نبيع|متوفر|متوفر لدينا|عرض خاص|لدينا|for sale|available|we sell)/i.test(`${candidate.title} ${candidate.bodyText}`);
+  const categoryAnchored = hasStrategyAnchor(candidate);
+  const evidenceMatch = categoryAnchored && (matchedSignals.length > 0 || directNeed);
+  const competitorProbability = plan.dealIntent === "sell" && sellerLanguage && !directNeed ? 80 : 10;
+  const score = evidenceMatch ? Math.max(55, Math.min(82, 52 + matchedSignals.length * 8 + (directNeed ? 18 : 0) - (competitorProbability >= 70 ? 35 : 0))) : 0;
   const recency = recencyScore(candidate.updateDate || candidate.postDate);
   const candidateCities = [candidate.city, candidate.geoCity].filter(Boolean).map(canonicalCity);
   const geographyFit = !strategy.cities?.length || strategy.cities.some((city) => candidateCities.includes(canonicalCity(city))) ? 100 : 35;
-  const requestedPhrase = strategy.searchTerm || strategy.query || "";
   return {
-    isQualified: titleMatched,
+    isQualified: score >= Number(plan.qualification?.minimumLeadScore || 65),
     marketplaceRole: plan.dealIntent === "buy" ? "SELLER" : "OWNER",
-    identityConfidence: titleMatched ? 100 : 0,
-    purchasePropensity: titleMatched ? 100 : 0,
-    evidenceStrength: titleMatched ? 100 : 0,
+    identityConfidence: evidenceMatch ? 70 : 0,
+    purchasePropensity: directNeed ? 82 : evidenceMatch ? 58 : 0,
+    evidenceStrength: evidenceMatch ? 68 : 0,
     recencyScore: recency,
-    sellerActivityScore: titleMatched ? 100 : 0,
+    sellerActivityScore: evidenceMatch ? 65 : 0,
     geographyFit,
-    competitorProbability: 0,
-    irrelevantProbability: titleMatched ? 0 : 100,
+    competitorProbability,
+    irrelevantProbability: evidenceMatch ? 25 : 100,
     matchedSignals,
-    negativeSignals: [],
-    demandEvidence: false,
-    supplyEvidence: false,
-    explanation: titleMatched
-      ? `The advertisement title contains the required search expression "${matchedSignals[0]}".`
-      : `Rejected because the advertisement title does not contain "${requestedPhrase}" or its English equivalent.`,
-    score: titleMatched ? 100 : 0,
+    negativeSignals: [
+      ...(categoryAnchored ? [] : ["The advertisement does not contain the strategy's product or behavior anchor"]),
+      ...(competitorProbability >= 70 ? ["The advertisement appears to sell the same offer"] : []),
+    ],
+    demandEvidence: directNeed,
+    supplyEvidence: sellerLanguage,
+    explanation: evidenceMatch
+      ? "The full advertisement contains evidence related to the active lead hypothesis."
+      : "Rejected because the full advertisement does not support the active lead hypothesis.",
+    score,
   };
 }
-async function qualifyCandidate(_env, candidate, plan) {
-  return scoreB2CCandidate(candidate, plan);
+
+const qualificationBatchSchema = {
+  type: "object", additionalProperties: false, required: ["items"],
+  properties: {
+    items: {
+      type: "array", maxItems: 100,
+      items: {
+        type: "object", additionalProperties: false,
+        required: ["postId", "verdict", "score", "identityConfidence", "purchasePropensity", "evidenceStrength", "marketplaceRole", "matchedSignals", "negativeSignals", "competitorProbability", "irrelevantProbability", "explanation"],
+        properties: {
+          postId: { type: "number" }, verdict: { type: "string", enum: ["STRONG", "POSSIBLE", "REJECT"] },
+          score: { type: "number" }, identityConfidence: { type: "number" }, purchasePropensity: { type: "number" }, evidenceStrength: { type: "number" },
+          marketplaceRole: { type: "string" }, matchedSignals: { type: "array", maxItems: 8, items: { type: "string" } },
+          negativeSignals: { type: "array", maxItems: 8, items: { type: "string" } }, competitorProbability: { type: "number" },
+          irrelevantProbability: { type: "number" }, explanation: { type: "string" },
+        },
+      },
+    },
+  },
+};
+
+async function qualifyCandidates(env, candidates, plan) {
+  if (!candidates.length) return [];
+  const minimumScore = Number(plan.qualification?.minimumLeadScore || 65);
+  try {
+    const result = await structuredResponse(
+      env,
+      "waslah_b2c_batch_qualification",
+      qualificationBatchSchema,
+      `You qualify Saudi consumer leads from public advertisements. Judge the title and body together against the active lead hypothesis, not by literal keyword matching. Return STRONG only when the ad contains observable evidence that this advertiser plausibly needs the customer's offer (or credibly offers it when dealIntent is buy). POSSIBLE is plausible but incomplete. REJECT competitors selling the same offer, irrelevant sellers, completed needs, job seekers, and speculative matches. Never infer private facts. Use the supplied strategy and negative signals. Return every postId exactly once.`,
+      {
+        offer: plan.product,
+        dealIntent: plan.dealIntent,
+        marketUnderstanding: plan.marketUnderstanding,
+        qualificationInstructions: plan.qualificationInstructions,
+        negativeSignals: plan.negativeSignals,
+        advertisements: candidates.map((candidate) => ({
+          postId: candidate.postId,
+          title: candidate.title,
+          body: candidate.bodyText.slice(0, 2400),
+          city: candidate.city || candidate.geoCity,
+          date: candidate.updateDate || candidate.postDate,
+          query: candidate.matchedStrategy.searchTerm || candidate.matchedStrategy.query,
+          strategyType: candidate.matchedStrategy.strategyType,
+          signal: candidate.matchedStrategy.signal,
+          leadHypothesis: candidate.matchedStrategy.leadHypothesis,
+        })),
+      },
+      6000,
+      "low",
+    );
+    const byPost = new Map((result?.items || []).map((item) => [Number(item.postId), item]));
+    return candidates.map((candidate) => {
+      const item = byPost.get(candidate.postId);
+      if (!item) return scoreB2CCandidate(candidate, plan);
+      const score = numeric(item.score, 0, 0, 100);
+      const categoryAnchored = hasStrategyAnchor(candidate);
+      return {
+        isQualified: categoryAnchored && item.verdict === "STRONG" && score >= minimumScore,
+        marketplaceRole: String(item.marketplaceRole || "UNKNOWN"),
+        identityConfidence: numeric(item.identityConfidence, 0, 0, 100),
+        purchasePropensity: numeric(item.purchasePropensity, 0, 0, 100),
+        evidenceStrength: numeric(item.evidenceStrength, 0, 0, 100),
+        recencyScore: recencyScore(candidate.updateDate || candidate.postDate),
+        sellerActivityScore: numeric(item.evidenceStrength, 0, 0, 100),
+        geographyFit: 100,
+        competitorProbability: numeric(item.competitorProbability, 0, 0, 100),
+        irrelevantProbability: numeric(item.irrelevantProbability, 0, 0, 100),
+        matchedSignals: (item.matchedSignals || []).map(String).slice(0, 8),
+        negativeSignals: [
+          ...(item.negativeSignals || []).map(String),
+          ...(categoryAnchored ? [] : ["The advertisement does not contain the strategy's product or behavior anchor"]),
+        ].slice(0, 8),
+        demandEvidence: item.verdict === "STRONG" && plan.dealIntent === "sell",
+        supplyEvidence: item.verdict === "STRONG" && plan.dealIntent === "buy",
+        verdict: item.verdict,
+        explanation: String(item.explanation || "Evidence-based qualification completed."),
+        score,
+      };
+    });
+  } catch {
+    return candidates.map((candidate) => scoreB2CCandidate(candidate, plan));
+  }
+}
+
+function localRelevanceRank(candidate, plan) {
+  const content = normalizeText(`${candidate.title} ${candidate.bodyText}`);
+  const query = normalizeText(candidate.matchedStrategy.searchTerm || candidate.matchedStrategy.query);
+  const overlap = meaningfulTokens(query).filter((token) => content.includes(token)).length;
+  const demand = /(?:مطلوب|ابي|أبي|ابغى|أبغى|احتاج|أحتاج|ادور|أدور|خربان|عطل|مشكلة|توضيب|افتتاح|عزيمة|مخيم|طلعة|wanted|need|looking for|broken|problem|opening|event)/i.test(`${candidate.title} ${candidate.bodyText}`);
+  const supply = /(?:للبيع|نبيع|متوفر|متوفر لدينا|عرض خاص|لدينا|توريد|for sale|available|we sell|supplier)/i.test(`${candidate.title} ${candidate.bodyText}`);
+  const procurement = plan.dealIntent === "buy";
+  const categoryAnchored = hasStrategyAnchor(candidate);
+  return overlap * 18 + (categoryAnchored ? 60 : -120) + (demand ? 48 : 0) + (procurement && supply ? 32 : 0) - (!procurement && supply && !demand ? 40 : 0) + recencyScore(candidate.updateDate || candidate.postDate) / 10;
+}
+
+async function mapWithConcurrency(items, concurrency, worker) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await worker(items[index], index);
+    }
+  }));
+  return results;
 }
 
 function leadTier(score) {
@@ -687,12 +971,14 @@ async function updateCampaign(database, campaignId, status, stats, errorMessage 
 
 const B2C_EXECUTION_RULES = [
   { id: "exact-count-contract", label: "Exact requested count is the completion contract" },
-  { id: "single-saudi-query", label: "Use one concrete Saudi-Arabic product expression for the campaign" },
-  { id: "title-match-only", label: "An advertisement qualifies only when its title contains the Arabic expression or its English equivalent" },
+  { id: "versioned-ai-strategist", label: `Use ${STRATEGIST_VERSION} to select buyer signals and phased Saudi search queries` },
+  { id: "evidence-qualification", label: "Qualify title and description against the lead hypothesis; reject competitors and speculative matches" },
+  { id: "concurrent-signal-probes", label: "Probe distinct buyer signals concurrently and pause zero-yield queries after the first sample" },
+  { id: "adaptive-recovery", label: "Generate a materially different recovery plan from observed rejection patterns when the first strategy set is exhausted" },
   { id: "verified-phone-only", label: "Only leads with a valid Saudi mobile number are delivered and charged" },
   { id: "organization-wide-deduplication", label: "Never redeliver the same seller or phone to the same workspace" },
   { id: "fresh-page-cursors", label: "Continue from page zero through every fresh result page until the target or true source exhaustion" },
-  { id: "authenticated-contact-resolution", label: "Resolve contact data with the configured authenticated connection" },
+  { id: "parallel-contact-resolution", label: "Resolve verified contact data concurrently within a bounded connection limit" },
   { id: "no-partial-success", label: "A short batch is never marked as a completed campaign" },
 ];
 
@@ -720,7 +1006,7 @@ export async function runB2CCampaign({ database, env, campaignId, logger }) {
   if (!campaign) throw new Error("B2C campaign not found.");
   const plan = jsonValue(campaign.acquisition_plan, {});
   const previousStats = jsonValue(campaign.stats, {});
-  const existingAggregate = await database("b2c_leads").where({ campaign_id: campaign.id }).select("tier").count("id as count").groupBy("tier");
+  const existingAggregate = await database("b2c_leads").where({ campaign_id: campaign.id, status: "DELIVERED" }).select("tier").count("id as count").groupBy("tier");
   const existingCount = existingAggregate.reduce((sum, row) => sum + Number(row.count), 0);
   const stats = {
     postsFetched: Number(previousStats.postsFetched || 0),
@@ -760,12 +1046,20 @@ export async function runB2CCampaign({ database, env, campaignId, logger }) {
     for (const strategy of strategies) {
       const key = strategyKey(strategy);
       const saved = strategyProgress[key] || {};
+      const inheritedZeroYield = Number(previousStats.candidatesQualified || 0) === 0 && Number(saved.pagesFetched || 0) >= 1;
+      const inheritedNoLeadYield = saved.deliveredCount == null && Number(saved.pagesFetched || 0) >= 2;
       strategyProgress[key] = {
         query: strategy.searchTerm || strategy.query,
         nextPage: Math.max(defaultPage, Math.floor(Number(saved.nextPage ?? defaultPage))),
         pagesFetched: Math.max(0, Math.floor(Number(saved.pagesFetched || 0))),
         postsFetched: Math.max(0, Math.floor(Number(saved.postsFetched || 0))),
-        exhausted: Boolean(saved.exhausted),
+        candidatesReviewed: Math.max(0, Math.floor(Number(saved.candidatesReviewed || 0))),
+        qualifiedCount: Math.max(0, Math.floor(Number(saved.qualifiedCount || 0))),
+        deliveredCount: Math.max(0, Math.floor(Number(saved.deliveredCount || 0))),
+        zeroYieldPages: Math.max(0, Math.floor(Number(saved.zeroYieldPages || 0))),
+        noLeadPages: Math.max(0, Math.floor(Number(saved.noLeadPages || 0))),
+        exhausted: Boolean(saved.exhausted || inheritedZeroYield || inheritedNoLeadYield),
+        exhaustedReason: saved.exhaustedReason || (inheritedZeroYield ? "low_yield_cutoff" : inheritedNoLeadYield ? "legacy_no_verified_lead_yield" : null),
         lastPageSignature: saved.lastPageSignature || null,
         repeatedPageCount: Math.max(0, Math.floor(Number(saved.repeatedPageCount || 0))),
       };
@@ -776,14 +1070,33 @@ export async function runB2CCampaign({ database, env, campaignId, logger }) {
     stats.strategyProgress = strategyProgress;
     stats.maxAds = maxAds || null;
     stats.sourceExhausted = strategies.length === 0 || strategies.every((strategy) => strategyProgress[strategyKey(strategy)].exhausted);
+    const openStrategies = strategies.filter((strategy) => !strategyProgress[strategyKey(strategy)].exhausted);
+    const productiveStrategies = openStrategies.filter((strategy) => strategyProgress[strategyKey(strategy)].deliveredCount > 0);
+    const untriedByPhase = new Map();
+    for (const strategy of openStrategies) {
+      const progress = strategyProgress[strategyKey(strategy)];
+      const phaseIndex = Number(strategy.phaseIndex || 0);
+      if (progress.pagesFetched === 0 && !untriedByPhase.has(phaseIndex)) untriedByPhase.set(phaseIndex, strategy);
+    }
+    const concurrency = numeric(env.B2C_PARALLEL_STRATEGIES, 4, 1, 8);
+    const trialStrategies = untriedByPhase.size
+      ? [...untriedByPhase.values()]
+      : openStrategies.slice().sort((left, right) => strategyProgress[strategyKey(left)].pagesFetched - strategyProgress[strategyKey(right)].pagesFetched);
+    const activeStrategies = (productiveStrategies.length ? productiveStrategies : trialStrategies)
+      .sort((left, right) => Number(left.phaseIndex || 0) - Number(right.phaseIndex || 0) || Number(right.weight || 0) - Number(left.weight || 0))
+      .slice(0, concurrency);
+    stats.activeStrategyPhase = activeStrategies.length
+      ? [...new Set(activeStrategies.map((strategy) => strategy.phase || "primary"))].join(", ")
+      : null;
+    stats.strategistVersion = plan.strategistVersion || STRATEGIST_VERSION;
     const qualifiedCandidates = [];
     let passPostsEvaluated = 0;
     let passQualified = 0;
-    for (const strategy of strategies) {
+    const pageGroups = await Promise.all(activeStrategies.map(async (strategy) => {
       const progress = strategyProgress[strategyKey(strategy)];
-      if (progress.exhausted || (maxAds > 0 && stats.postsFetched >= maxAds)) continue;
+      const groups = [];
       for (let pageCount = 0; pageCount < pagesPerStreamingPass; pageCount += 1) {
-        if (maxAds > 0 && stats.postsFetched >= maxAds) break;
+        if (progress.exhausted || (maxAds > 0 && stats.postsFetched >= maxAds)) break;
         const page = progress.nextPage;
         const result = await fetchHarajSearch(env, {
           search: strategy.searchTerm || strategy.query,
@@ -792,65 +1105,113 @@ export async function runB2CCampaign({ database, env, campaignId, logger }) {
           limit,
         });
         const items = Array.isArray(result.items) ? result.items : [];
-        stats.postsFetched += items.length;
-        progress.postsFetched += items.length;
-        progress.pagesFetched += 1;
-        progress.nextPage = page + 1;
         const pageSignature = createHash("sha1").update(items.map((item) => String(item?.id || "")).join(",")).digest("hex");
         progress.repeatedPageCount = pageSignature === progress.lastPageSignature ? progress.repeatedPageCount + 1 : 0;
         progress.lastPageSignature = pageSignature;
-        if (!result.pageInfo?.hasNextPage || progress.repeatedPageCount >= 2) progress.exhausted = true;
-        appendExecutionEvent(stats, "PAGE_FETCHED", {
-          query: strategy.searchTerm || strategy.query,
-          mode: "search",
-          phase: strategy.phase || "primary",
-          page,
-          returned: items.length,
-          nextPage: progress.nextPage,
-          exhausted: progress.exhausted,
-        });
-        await updateCampaign(database, campaign.id, "RUNNING", stats);
-        for (const post of items) {
-          const candidate = normalizeCandidate(post, strategy);
-          if (!Number.isFinite(candidate.postId)) continue;
-          passPostsEvaluated += 1;
-          if (!stats.relevanceSample) stats.relevanceSamplePosts += 1;
-          const qualification = await qualifyCandidate(env, candidate, plan);
-          await saveCandidate(database, campaign, candidate, qualification);
-          if (!qualification.isQualified || qualification.score < plan.qualification.minimumLeadScore) continue;
-          stats.candidatesQualified += 1;
-          passQualified += 1;
-          if (!stats.relevanceSample) stats.relevanceSampleQualified += 1;
-          qualifiedCandidates.push({ candidate, qualification });
+        progress.postsFetched += items.length;
+        progress.pagesFetched += 1;
+        progress.nextPage = page + 1;
+        if (!result.pageInfo?.hasNextPage || progress.repeatedPageCount >= 2) {
+          progress.exhausted = true;
+          progress.exhaustedReason = !result.pageInfo?.hasNextPage ? "source_end" : "repeated_page";
         }
-        if (!stats.relevanceSample && stats.relevanceSamplePosts >= 100) {
-          const sampleRate = stats.relevanceSampleQualified / stats.relevanceSamplePosts;
-          const minimumRate = Math.max(0, Math.min(1, Number(env.B2C_RELEVANCE_SAMPLE_MIN_RATE || 0.01)));
-          const broadRate = Math.max(minimumRate, Math.min(1, Number(env.B2C_RELEVANCE_SAMPLE_BROAD_RATE || 0.45)));
-          const aligned = plan.preflight?.aligned !== false;
-          const failed = !aligned;
-          stats.relevanceSample = {
-            size: stats.relevanceSamplePosts,
-            qualified: stats.relevanceSampleQualified,
-            rate: Number(sampleRate.toFixed(4)),
-            aligned,
-            selectedQueries: plan.preflight?.selectedQueries || plan.strategies.map((item) => item.searchTerm || item.query),
-            status: failed ? "failed" : (sampleRate < minimumRate || sampleRate > broadRate) ? "warning" : "passed",
-            reason: !aligned
-              ? "The selected search expression does not match the requested offer."
-              : sampleRate < minimumRate
-                ? "The first sample produced too few relevant candidates."
-                : sampleRate > broadRate
-                  ? "The first sample is unusually broad and should be reviewed for precision."
-                  : "The first sample shows sufficient exact-title matches.",
-          };
-          await updateCampaign(database, campaign.id, "RUNNING", stats);
-          if (failed) throw new Error(`B2C relevance preflight failed: ${stats.relevanceSample.reason}`);
-        }
-        await updateCampaign(database, campaign.id, "RUNNING", stats);
+        groups.push({ strategy, page, items });
         if (progress.exhausted) break;
       }
+      return groups;
+    }));
+    const fetchedGroups = pageGroups.flat();
+    const aiCandidateLimit = numeric(env.B2C_AI_CANDIDATES_PER_QUERY, 14, 4, 30);
+    const candidatesForReview = [];
+    for (const { strategy, page, items } of fetchedGroups) {
+      const progress = strategyProgress[strategyKey(strategy)];
+      stats.postsFetched += items.length;
+      passPostsEvaluated += items.length;
+      if (!stats.relevanceSample) stats.relevanceSamplePosts += items.length;
+      const anchoredCandidates = items
+        .map((post) => normalizeCandidate(post, strategy))
+        .filter((candidate) => Number.isFinite(candidate.postId))
+        .filter((candidate) => hasStrategyAnchor(candidate));
+      const ranked = anchoredCandidates
+        .map((candidate) => ({ candidate, rank: localRelevanceRank(candidate, plan) }))
+        .sort((left, right) => right.rank - left.rank)
+        .slice(0, aiCandidateLimit)
+        .map((item) => item.candidate);
+      progress.candidatesReviewed += ranked.length;
+      candidatesForReview.push(...ranked);
+      stats.fastPrefilterRejected = Number(stats.fastPrefilterRejected || 0) + Math.max(0, items.length - ranked.length);
+      appendExecutionEvent(stats, "PAGE_FETCHED", {
+        query: strategy.searchTerm || strategy.query,
+        mode: "search",
+        phase: strategy.phase || "primary",
+        page,
+        returned: items.length,
+        shortlisted: ranked.length,
+        nextPage: progress.nextPage,
+        exhausted: progress.exhausted,
+      });
     }
+    await updateCampaign(database, campaign.id, "RUNNING", stats);
+    const qualificationChunks = [];
+    const qualificationBatchSize = numeric(env.B2C_AI_QUALIFICATION_BATCH_SIZE, 28, 8, 50);
+    for (let index = 0; index < candidatesForReview.length; index += qualificationBatchSize) {
+      qualificationChunks.push(candidatesForReview.slice(index, index + qualificationBatchSize));
+    }
+    const qualificationGroups = await Promise.all(qualificationChunks.map((chunk) => qualifyCandidates(env, chunk, plan)));
+    const pageQualifications = qualificationGroups.flat();
+    const qualifiedThisPassByStrategy = new Map();
+    await Promise.all(candidatesForReview.map(async (candidate, candidateIndex) => {
+      const qualification = pageQualifications[candidateIndex] || scoreB2CCandidate(candidate, plan);
+      await saveCandidate(database, campaign, candidate, qualification);
+      if (!qualification.isQualified || qualification.score < plan.qualification.minimumLeadScore) return;
+      const key = candidate.matchedStrategy.pathId;
+      qualifiedThisPassByStrategy.set(key, Number(qualifiedThisPassByStrategy.get(key) || 0) + 1);
+      qualifiedCandidates.push({ candidate, qualification });
+    }));
+    for (const strategy of activeStrategies) {
+      const progress = strategyProgress[strategyKey(strategy)];
+      const newlyQualified = Number(qualifiedThisPassByStrategy.get(strategy.pathId) || 0);
+      progress.qualifiedCount += newlyQualified;
+      progress.zeroYieldPages = newlyQualified > 0 ? 0 : progress.zeroYieldPages + pagesPerStreamingPass;
+      if (!progress.exhausted && ((progress.qualifiedCount === 0 && progress.pagesFetched >= 1) || progress.zeroYieldPages >= 2)) {
+        progress.exhausted = true;
+        progress.exhaustedReason = "low_yield_cutoff";
+        appendExecutionEvent(stats, "QUERY_PAUSED_LOW_YIELD", {
+          query: strategy.searchTerm || strategy.query,
+          phase: strategy.phase || "primary",
+          pagesFetched: progress.pagesFetched,
+          qualified: progress.qualifiedCount,
+        });
+      }
+    }
+    passQualified = qualifiedCandidates.length;
+    stats.candidatesQualified += passQualified;
+    if (!stats.relevanceSample) stats.relevanceSampleQualified += passQualified;
+    if (!stats.relevanceSample && stats.relevanceSamplePosts >= 100) {
+      const sampleRate = stats.relevanceSampleQualified / stats.relevanceSamplePosts;
+      const minimumRate = Math.max(0, Math.min(1, Number(env.B2C_RELEVANCE_SAMPLE_MIN_RATE || 0.01)));
+      const broadRate = Math.max(minimumRate, Math.min(1, Number(env.B2C_RELEVANCE_SAMPLE_BROAD_RATE || 0.45)));
+      stats.relevanceSample = {
+        size: stats.relevanceSamplePosts,
+        qualified: stats.relevanceSampleQualified,
+        rate: Number(sampleRate.toFixed(4)),
+        aligned: plan.preflight?.aligned !== false,
+        selectedQueries: plan.preflight?.selectedQueries || plan.strategies.map((item) => item.searchTerm || item.query),
+        status: sampleRate < minimumRate || sampleRate > broadRate ? "warning" : "passed",
+        reason: sampleRate < minimumRate
+          ? "The first concurrent sample produced too few relevant candidates, so low-yield queries were rotated out."
+          : sampleRate > broadRate
+            ? "The first sample is unusually broad and should be reviewed for precision."
+            : "The first concurrent sample produced evidence-qualified candidates.",
+      };
+    }
+    appendExecutionEvent(stats, "CONCURRENT_SAMPLE_COMPLETED", {
+      queries: activeStrategies.length,
+      ads: passPostsEvaluated,
+      reviewed: candidatesForReview.length,
+      qualified: passQualified,
+    });
+    await updateCampaign(database, campaign.id, "RUNNING", stats);
     stats.sourceExhausted = strategies.length === 0 || strategies.every((strategy) => strategyProgress[strategyKey(strategy)].exhausted);
 
     const sellerKey = (candidate) => candidate.authorId != null
@@ -901,6 +1262,21 @@ export async function runB2CCampaign({ database, env, campaignId, logger }) {
       const phone = normalizeSaudiPhone(row.phone);
       if (phone) previouslyDeliveredPhones.add(phone);
     }
+    const contactConcurrency = numeric(env.B2C_CONTACT_CONCURRENCY, 8, 1, 16);
+    const contactCandidates = uniqueCandidates.filter(({ key }) => !previouslyDeliveredSellers.has(key) && !phoneCache.has(key));
+    const contactResults = await mapWithConcurrency(contactCandidates, contactConcurrency, async ({ candidate }) => {
+      try {
+        const contact = await fetchHarajPostContact(env, candidate.postId);
+        return { candidate, contact, error: null };
+      } catch (error) {
+        return { candidate, contact: {}, error };
+      }
+    });
+    const prefetchedContacts = new Map(contactResults.map((result) => [result.candidate.postId, result]));
+    const deliveredThisPassByStrategy = new Map();
+    stats.contactAttempts += contactCandidates.length;
+    stats.passContactAttempts += contactCandidates.length;
+    appendExecutionEvent(stats, "CONTACT_BATCH_COMPLETED", { attempted: contactCandidates.length, concurrency: contactConcurrency });
     for (const { key, candidate, qualification } of uniqueCandidates) {
       if (stats.uniqueLeads >= Number(campaign.target_lead_count)) break;
       stats.contactCandidatesProcessed += 1;
@@ -917,10 +1293,10 @@ export async function runB2CCampaign({ database, env, campaignId, logger }) {
       let contact = resolvedPhone ? { contactMobile: resolvedPhone } : null;
       if (phoneCache.has(key)) stats.cachedContactHits += 1;
       if (!resolvedPhone) {
-        stats.contactAttempts += 1;
-        stats.passContactAttempts += 1;
+        const prefetched = prefetchedContacts.get(candidate.postId);
         try {
-          contact = await fetchHarajPostContact(env, candidate.postId);
+          if (prefetched?.error) throw prefetched.error;
+          contact = prefetched?.contact || {};
           resolvedPhone = normalizeSaudiPhone(contact?.contactMobile || String(contact?.contactText || "").match(/(?:\+?966|0)?5\d{8}/)?.[0]);
         } catch (error) {
           logger?.warn?.(`Haraj contact lookup failed for post ${candidate.postId}: ${String(error?.message || error)}`);
@@ -951,7 +1327,8 @@ export async function runB2CCampaign({ database, env, campaignId, logger }) {
       phoneCache.set(key, resolvedPhone);
       contact = { ...(contact || {}), contactMobile: resolvedPhone };
       await persistQualifiedB2CLead(database, campaign, candidate, qualification, contact);
-      const aggregate = await database("b2c_leads").where({ campaign_id: campaign.id }).select("tier").count("id as count").groupBy("tier");
+      deliveredThisPassByStrategy.set(candidate.matchedStrategy.pathId, Number(deliveredThisPassByStrategy.get(candidate.matchedStrategy.pathId) || 0) + 1);
+      const aggregate = await database("b2c_leads").where({ campaign_id: campaign.id, status: "DELIVERED" }).select("tier").count("id as count").groupBy("tier");
       stats.uniqueLeads = aggregate.reduce((sum, row) => sum + Number(row.count), 0);
       if (!stats.firstLeadAt && stats.uniqueLeads > 0) stats.firstLeadAt = new Date().toISOString();
       stats.hotLeads = Number(aggregate.find((row) => row.tier === "HOT")?.count || 0);
@@ -960,6 +1337,66 @@ export async function runB2CCampaign({ database, env, campaignId, logger }) {
       await database("lead_requests").where({ id: campaign.request_id }).update({ result_count: stats.uniqueLeads, updated_at: new Date().toISOString() });
       stats.exactCountContract = { requested: Number(campaign.target_lead_count), delivered: stats.uniqueLeads, remaining: Math.max(0, Number(campaign.target_lead_count) - stats.uniqueLeads) };
       appendExecutionEvent(stats, "LEAD_DELIVERED", { delivered: stats.uniqueLeads, requested: Number(campaign.target_lead_count) });
+    }
+    for (const strategy of activeStrategies) {
+      const progress = strategyProgress[strategyKey(strategy)];
+      const newlyDelivered = Number(deliveredThisPassByStrategy.get(strategy.pathId) || 0);
+      progress.deliveredCount += newlyDelivered;
+      progress.noLeadPages = newlyDelivered > 0 ? 0 : progress.noLeadPages + pagesPerStreamingPass;
+      if (!progress.exhausted && progress.noLeadPages >= 2) {
+        progress.exhausted = true;
+        progress.exhaustedReason = "no_verified_lead_yield";
+        appendExecutionEvent(stats, "QUERY_PAUSED_NO_VERIFIED_LEADS", {
+          query: strategy.searchTerm || strategy.query,
+          phase: strategy.phase || "primary",
+          pagesFetched: progress.pagesFetched,
+          qualified: progress.qualifiedCount,
+          delivered: progress.deliveredCount,
+        });
+      }
+    }
+    stats.sourceExhausted = strategies.length === 0 || strategies.every((strategy) => strategyProgress[strategyKey(strategy)].exhausted);
+    if (stats.sourceExhausted && stats.uniqueLeads < Number(campaign.target_lead_count) && Number(stats.strategyRegenerations || 0) < 1) {
+      const campaignIntent = jsonValue(campaign.intent, {});
+      const procurement = plan.dealIntent === "buy";
+      const recoveryPlan = await createStrategistPlan(
+        env,
+        `${campaign.original_prompt}\n\nRECOVERY CONTEXT: The first strategy set produced ${stats.uniqueLeads} delivered leads from ${stats.postsFetched} advertisements. Generate materially different observable buyer signals. Avoid generic product searches and direct competitors.`,
+        campaignIntent,
+        procurement,
+      );
+      const existingQueries = new Set(strategies.map((strategy) => normalizeText(strategy.searchTerm || strategy.query)));
+      const phaseBase = Math.max(-1, ...strategies.map((strategy) => Number(strategy.phaseIndex || 0))) + 1;
+      const recoveryPhases = [recoveryPlan.primary_strategy, ...recoveryPlan.fallback_strategies];
+      const recoveryStrategies = recoveryPhases
+        .flatMap((phase, index) => strategiesFromStrategistPhase(phase, campaignIntent, procurement, `recovery-${index + 1}`, phaseBase + index))
+        .filter((strategy) => !existingQueries.has(normalizeText(strategy.searchTerm || strategy.query)));
+      if (recoveryStrategies.length) {
+        strategies.push(...recoveryStrategies);
+        plan.strategies = strategies;
+        plan.recoveryStrategyPlan = recoveryPlan;
+        stats.strategyRegenerations = Number(stats.strategyRegenerations || 0) + 1;
+        for (const strategy of recoveryStrategies) {
+          strategyProgress[strategyKey(strategy)] = {
+            query: strategy.searchTerm || strategy.query,
+            nextPage: defaultPage,
+            pagesFetched: 0,
+            postsFetched: 0,
+            candidatesReviewed: 0,
+            qualifiedCount: 0,
+            deliveredCount: 0,
+            zeroYieldPages: 0,
+            noLeadPages: 0,
+            exhausted: false,
+            exhaustedReason: null,
+            lastPageSignature: null,
+            repeatedPageCount: 0,
+          };
+        }
+        stats.sourceExhausted = false;
+        appendExecutionEvent(stats, "STRATEGY_REGENERATED", { addedQueries: recoveryStrategies.length, reason: "initial_strategies_exhausted" });
+        await database("b2c_campaigns").where({ id: campaign.id }).update({ acquisition_plan: dbJson(plan), stats: dbJson(stats), updated_at: new Date().toISOString() });
+      }
     }
     const shouldContinue = stats.uniqueLeads < Number(campaign.target_lead_count)
       && !stats.sourceExhausted
@@ -976,7 +1413,7 @@ export async function runB2CCampaign({ database, env, campaignId, logger }) {
     const finalMessage = finalStatus === "FAILED"
       ? stats.contactAuthentication === "rejected"
         ? "Wasla could not finish contact verification. The secure sourcing connection must be refreshed before this run can continue."
-        : `Wasla reached the end of every result page for the approved search expression after delivering ${stats.uniqueLeads} of ${Number(campaign.target_lead_count)} requested leads.`
+        : `Wasla exhausted every approved buyer-signal and recovery strategy after delivering ${stats.uniqueLeads} of ${Number(campaign.target_lead_count)} requested leads.`
       : null;
     appendExecutionEvent(stats, finalStatus === "COMPLETED" ? "EXACT_TARGET_REACHED" : "TERMINAL_SHORTFALL", { delivered: stats.uniqueLeads, requested: Number(campaign.target_lead_count), sourceExhausted: stats.sourceExhausted, maxAdsReached: maxAds > 0 && stats.postsFetched >= maxAds });
     await database("lead_requests").where({ id: campaign.request_id }).update({ status: requestStatus, result_count: stats.uniqueLeads, error_message: finalMessage, updated_at: new Date().toISOString() });
@@ -999,9 +1436,9 @@ export function buildPublicB2CExplanation(row) {
   const query = plan.strategies?.[0]?.searchTerm || plan.strategies?.[0]?.query || product;
   const cities = intent.market?.cities?.length ? intent.market.cities : [intent.market?.country || "Saudi Arabia"];
   return {
-    thinking: `Wasla reduced ${product} to one precise market expression and focused the search on ${cities.join(", ")}.`,
-    understanding: `Only advertisements whose titles contained “${query}” or its English equivalent were considered.`,
-    sourcing: `Wasla analyzed ${Number(stats.postsFetched || 0).toLocaleString()} public advertisements, qualified ${Number(stats.candidatesQualified || 0).toLocaleString()} exact-title matches, and delivered ${Number(stats.uniqueLeads || 0).toLocaleString()} distinct prospects with verified Saudi mobile numbers.`,
+    thinking: `Wasla mapped ${product} to observable buyer signals and focused the strongest search paths on ${cities.join(", ")}.`,
+    understanding: `Wasla tested “${query}” alongside distinct recovery paths, then evaluated each full advertisement against the campaign's buyer-signal hypothesis.`,
+    sourcing: `Wasla analyzed ${Number(stats.postsFetched || 0).toLocaleString()} public activity signals, evidence-qualified ${Number(stats.candidatesQualified || 0).toLocaleString()} candidates, and delivered ${Number(stats.uniqueLeads || 0).toLocaleString()} distinct prospects with verified Saudi mobile numbers.`,
     metrics: { analyzed: Number(stats.postsFetched || 0), qualified: Number(stats.candidatesQualified || 0), delivered: Number(stats.uniqueLeads || 0), requested: Number(row.target_lead_count || 0) },
   };
 }

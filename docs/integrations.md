@@ -67,7 +67,7 @@ API references: [Postiz create post](https://docs.postiz.com/public-api/posts/cr
 
 Keep live Haraj credentials in the ignored `.env.haraj` file. Directus reads them server-side in Docker; the frontend never receives the bearer token.
 
-The B2C planner reduces the customer's full context to exactly one concise Saudi-Arabic product expression, preserving a model or version when necessary. The runner calls the search operation from page zero onward. An advertisement qualifies only when its title contains the Arabic expression or its English equivalent. Candidates are deduplicated, and `postContact(postId, isManualRequest: true)` is called through the authenticated server connection. Only unique records with valid Saudi mobile numbers are delivered. No tag taxonomy, category lookup, or synonym recovery is used.
+The B2C planner runs a versioned Saudi lead-search strategist that converts the customer's offer into a primary buyer-signal strategy and a short fallback ladder. Each phase contains distinct, natural Saudi-Arabic queries; fallback phases activate only after stronger paths are exhausted. The runner searches from page zero onward and batch-qualifies the full advertisement title and body against the lead hypothesis, rejecting competitors and speculative matches. Candidates are deduplicated, and `postContact(postId, isManualRequest: true)` is called through the authenticated server connection. Only unique records with valid Saudi mobile numbers are delivered. No tag taxonomy or category recipe participates in retrieval.
 
 ## n8n
 
