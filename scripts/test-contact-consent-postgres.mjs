@@ -5,9 +5,12 @@ import {createRequire} from 'node:module';
 import {readdirSync} from 'node:fs';
 import {randomUUID,createHmac} from 'node:crypto';
 import {createConsentWorkflow,canonicalConsentJson,CONSENT_STATEMENT_VERSION} from '/directus/extensions/directus-extension-waslah-lead-agent/dist/contact-consent.js';
-import {createContactAuthorizer,authorizeContactExport} from '/directus/extensions/directus-extension-waslah-lead-agent/dist/contact-authorization.js';
-import {persistQualifiedB2CLead,serializeB2CLead,runB2CCampaign} from '/directus/extensions/directus-extension-waslah-lead-agent/dist/b2c.js';
+import {createContactAuthorizer,authorizeContactExport,contactPhoneHash} from '/directus/extensions/directus-extension-waslah-lead-agent/dist/contact-authorization.js';
+import {persistQualifiedB2CLead,serializeB2CLead,runB2CCampaign,fetchHarajPostContact} from '/directus/extensions/directus-extension-waslah-lead-agent/dist/b2c.js';
+import {contactScheduler} from '/directus/extensions/directus-extension-waslah-lead-agent/dist/b2c-pipeline.js';
+import {configureHarajSafety,initialHarajState} from '/directus/extensions/directus-extension-waslah-lead-agent/dist/haraj-safety.js';
 import {recordMerchantDirectoryContact} from '/directus/extensions/directus-extension-waslah-lead-agent/dist/merchant-directory.js';
+import {runDeploymentSmoke} from '/directus/extensions/directus-extension-waslah-lead-agent/dist/deployment-smoke.js';
 const require=createRequire(import.meta.url),folder=readdirSync('/directus/node_modules/.pnpm').find(name=>name.startsWith('knex@'));
 const knex=require(`/directus/node_modules/.pnpm/${folder}/node_modules/knex`);
 const connection={host:process.env.DB_HOST,port:Number(process.env.DB_PORT||5432),database:process.env.DB_DATABASE,user:process.env.DB_USER,password:process.env.DB_PASSWORD};
@@ -36,6 +39,16 @@ try{
   const merchantHeaders={'x-consent-timestamp':merchantTimestamp,'x-consent-event-id':merchantBody.event_id,'x-consent-signature':'sha256='+createHmac('sha256',env.HARAJ_CONSENT_SIGNING_SECRET).update(`${merchantTimestamp}.${merchantBody.event_id}.${canonicalConsentJson(merchantBody)}`).digest('hex')};
   await workflow.attest(merchantHeaders,merchantBody);
   assert.equal((await createContactAuthorizer(db,org)({provider:'mahally',authorId:'12',action:'save',phone})).allowed,true);
+  // Trusted Haraj business-publication evidence is provider-bound, exact-phone
+  // scoped and independent of a personal consent record. The worker cannot
+  // create this row; this fixture represents the external verified bridge.
+  const businessPhone='+966555555003',businessAuthor='35';
+  await db('haraj_business_publications').insert({id:randomUUID(),organization_id:org,author_id:businessAuthor,phone_hash:contactPhoneHash(businessPhone),profile_url:`https://haraj.com.sa/users/${businessAuthor}/`,source_url:`https://haraj.com.sa/${businessAuthor}/`,evidence_digest:'a'.repeat(64),evidence_kind:'owner_bound_business_contact_field',verified_by:'trusted-haraj-publication-bridge',observed_at:new Date().toISOString(),expires_at:new Date(Date.now()+86400_000).toISOString()});
+  for(const action of ['save','reveal','download'])assert.equal((await createContactAuthorizer(db,org)({authorId:businessAuthor,action,phone:businessPhone})).allowed,true,`published Haraj business ${action}`);
+  assert.equal((await createContactAuthorizer(db,org)({authorId:businessAuthor,action:'lookup'})).allowed,false,'publication cannot authorize personal-phone lookup');
+  assert.equal((await createContactAuthorizer(db,org)({authorId:businessAuthor,action:'call',phone:businessPhone})).allowed,false,'publication cannot authorize commercial calling');
+  await workflow.revoke({organizationId:org,authorId:businessAuthor,userId:context.userId});
+  assert.equal((await createContactAuthorizer(db,org)({authorId:businessAuthor,action:'reveal',phone:businessPhone})).allowed,false,'withdrawal suppresses Haraj publication evidence immediately');
   // Exercise the real Lite inventory/target/billing transaction for a synthetic
   // authorized merchant. Tables live only in this disposable test schema.
   const table=async(name,fields)=>db.schema.createTable(name,t=>{for(const [kind,names] of Object.entries(fields))for(const field of names)t[kind](field);});
@@ -106,6 +119,92 @@ try{
   const result=await runB2CCampaign({database:db,campaignId:campaign.id,env:{MAHALLY_ENABLED:'true',MAHALLY_PUBLIC_DIRECTORY:'true',MAHALLY_WORKER_URL:'http://fixture.invalid',MAHALLY_WORKER_TOKEN:'fixture-token-not-used-123456789012345'}});
   assert.equal(result.uniqueLeads,2);
   assert.equal((await db('b2c_campaigns').where({id:campaign.id}).first()).status,'COMPLETED','merchant campaigns bypass the unconfigured Haraj guard');
+  // The same centralized authorizer used by the Haraj contact scheduler must
+  // reach the real GraphQL adapter and storage without individual grants.
+  // HTTP is synthetic; no live Haraj requests or production permissions.
+  const providerId=randomUUID(),providerPhone='+966555555004';
+  const providerCandidate={...candidate,postId:360,authorId:36,authorUsername:'haraj-fixture',contactSubject:{provider:'haraj',authorId:'36'},merchant:null,businessContact:{phones:[providerPhone]}};
+  const providerEnv={HARAJ_GRAPHQL_BASE_URL:'https://graphql.haraj.com.sa/',HARAJ_BEARER_TOKEN:'synthetic-token'};
+  const providerScope={organization_id:org,provider:'haraj',purpose:'lead_generation',subject_scope:'all_provider_subjects',contact_scope:'provider_contact_fields',actions:JSON.stringify(['lookup','save','reveal','download']),status:'active',evidence_reference:'synthetic-provider-agreement',evidence_digest:'b'.repeat(64),verified_by:'fixture-reviewer',verified_at:new Date().toISOString(),valid_from:new Date().toISOString(),expires_at:new Date(Date.now()+86400_000).toISOString()};
+  let httpCalls=0;
+  const safetyState=initialHarajState();Object.assign(safetyState,{paused:false,reason:null});
+  configureHarajSafety({store:{transact:async fn=>fn(safetyState)},notify:async()=>{},sleep:async()=>{}});
+  globalThis.fetch=async()=>{httpCalls++;return new Response(JSON.stringify({data:{postContact:{contactMobile:providerPhone,contactText:'',shouldEnableWhatsApp:true}}}),{status:200,headers:{'content-type':'application/json'}});};
+  campaign.target_lead_count=5;
+  await db('b2c_campaigns').where({id:campaign.id}).update({status:'RUNNING',target_lead_count:5});
+  const deliver=async()=>{
+    const lookup=await createContactAuthorizer(db,org)({authorId:36,action:'lookup'});
+    if(!lookup.allowed)return {created:false,reason:lookup.detail};
+    const contact=await fetchHarajPostContact(providerEnv,360);
+    return persistQualifiedB2CLead(db,campaign,providerCandidate,qualification,contact,true);
+  };
+  const missing=await createContactAuthorizer(db,org)({authorId:36,action:'lookup'});
+  assert.equal(missing.providerAuthorization.detail,'provider_permission_missing');
+  assert.equal(missing.individualConsent.detail,'consent_record_missing');
+  assert.equal((await deliver()).reason,'consent_record_missing');assert.equal(httpCalls,0,'missing all permission bases prevents retrieval');
+  await db('wasla_provider_contact_permissions').insert({id:providerId,...providerScope});
+  const scheduler=contactScheduler({target:1,process:deliver});
+  const submitted=await scheduler.submit({},'provider-fixture');
+  assert.equal((await submitted.done).created,true);await scheduler.drain();
+  assert.equal(httpCalls,1,'reviewed provider lookup reaches postContact without a personal grant');
+  const storedProvider=await db('b2c_leads').where({author_id:36}).first();
+  assert.equal(storedProvider.phone,providerPhone);
+  assert.equal(Number((await db('wasla_contact_audit').where({author_id:'36',action:'save',allowed:true}).count('* as n').first()).n),1,'primary phone is authorized exactly once during storage');
+  assert.equal((await serializeB2CLead(storedProvider,true,db,org)).phone,providerPhone,'provider reveal covers Lite serialization');
+  assert.equal((await authorizeContactExport(db,storedProvider,org,{sourceHint:'haraj',action:'download'})).phone,providerPhone);
+  assert.equal((await createContactAuthorizer(db,org)({authorId:36,action:'call',phone:providerPhone})).allowed,false,'calling was not covered');
+  assert.equal((await createContactAuthorizer(db,randomUUID())({authorId:36,action:'lookup'})).allowed,false,'provider permission is workspace-bound');
+  await workflow.revoke({organizationId:org,authorId:'37',userId:context.userId});
+  assert.equal((await createContactAuthorizer(db,org)({authorId:37,action:'lookup'})).status,'revoked','withdrawal without a personal grant overrides provider lookup');
+  assert.equal((await createContactAuthorizer(db,org)({authorId:37,action:'save',phone:providerPhone})).status,'revoked');
+  assert.equal((await createContactAuthorizer(db,org)({provider:'mahally',authorId:36,action:'lookup'})).allowed,false,'Haraj agreement cannot authorize another provider');
+  await db('wasla_provider_contact_permissions').where({id:providerId}).update({expires_at:new Date(Date.now()-1).toISOString(),valid_from:new Date(Date.now()-86400_000).toISOString()});
+  const expiredPolicy=await createContactAuthorizer(db,org)({authorId:36,action:'lookup'});
+  assert.equal(expiredPolicy.detail,'provider_permission_expired_or_not_active');
+  assert.equal(expiredPolicy.individualConsent.detail,'consent_record_missing');
+  assert.equal((await authorizeContactExport(db,storedProvider,org,{sourceHint:'haraj',action:'download'})).phone,null,'expired agreement blocks stored export');
+  await db('wasla_provider_contact_permissions').where({id:providerId}).update({expires_at:providerScope.expires_at,actions:JSON.stringify(['lookup'])});
+  const writesBefore=Number((await db('wallet_transactions').count('* as n').first()).n);
+  const noSave=await persistQualifiedB2CLead(db,campaign,{...providerCandidate,authorId:39,authorUsername:'lookup-only-fixture',contactSubject:{provider:'haraj',authorId:'39'}},qualification,{contactMobile:'+966555555005'},true);
+  assert.equal(noSave.detail,'provider_action_not_authorized','lookup alone cannot store a contact');
+  assert.equal(Number((await db('wallet_transactions').count('* as n').first()).n),writesBefore,'save denial cannot bill');
+  await db('wasla_provider_contact_permissions').where({id:providerId}).update({actions:JSON.stringify(['lookup','save','reveal','download','call'])});
+  assert.equal((await createContactAuthorizer(db,org)({authorId:36,action:'call',phone:providerPhone})).allowed,true,'explicit calling permission is honored');
+  // Revocation waits for current policy readers, then blocks new decisions.
+  let releasePolicy,policyReady;
+  const policyHeld=new Promise(resolve=>{releasePolicy=resolve;}),policyStarted=new Promise(resolve=>{policyReady=resolve;});
+  const policyRead=db.transaction(async trx=>{assert.equal((await createContactAuthorizer(trx,org)({authorId:36,action:'save',phone:providerPhone})).allowed,true);policyReady();await policyHeld;});
+  await policyStarted;let policyUpdated=false;
+  const policyRevoke=db('wasla_provider_contact_permissions').where({id:providerId}).update({status:'revoked',revoked_at:new Date().toISOString()}).then(()=>{policyUpdated=true;});
+  await new Promise(resolve=>setTimeout(resolve,100));assert.equal(policyUpdated,false,'provider revocation serializes with in-flight save authorization');
+  releasePolicy();await Promise.all([policyRead,policyRevoke]);
+  assert.equal((await deliver()).reason,'provider_permission_revoked');assert.equal(httpCalls,1,'revoked provider permission cannot fetch');
+  assert.equal((await authorizeContactExport(db,storedProvider,org,{sourceHint:'haraj',action:'download'})).phone,null,'provider revocation blocks existing saved exports');
+  assert.equal(Number((await db('wasla_contact_authorizations').count('* as n').first()).n),2,'provider policy fabricates no personal grants');
+  assert.ok(await db('wasla_contact_audit').where({authorization_id:providerId,detail:'verified_provider_permission',allowed:true}).first(),'provider decision is auditable by agreement id');
+  // A valid primary subject scope must survive an unauthorized extra number;
+  // both candidate and inventory payloads must exclude the denied raw phone.
+  await db('wasla_provider_contact_permissions').where({id:providerId}).update({status:'active',revoked_at:null,actions:JSON.stringify(['lookup'])});
+  const scopedPhone='+966555555006',deniedExtra='+966555555007';
+  await db('wasla_contact_authorizations').insert({id:randomUUID(),organization_id:org,author_id:'38',provider:'haraj',purpose:'lead_generation',status:'granted',actions:JSON.stringify(['save']),phone_hashes:JSON.stringify([contactPhoneHash(scopedPhone)]),evidence_reference:'synthetic-subject-scope',verified_by:'fixture',verified_at:new Date().toISOString(),granted_at:new Date().toISOString(),expires_at:providerScope.expires_at,policy_version:2,contact_kind:'personal'});
+  const scopedCandidate={...providerCandidate,authorId:38,authorUsername:'scoped-fixture',contactSubject:{provider:'haraj',authorId:'38'},businessContact:{phones:[scopedPhone,scopedPhone,deniedExtra]}};
+  const extraResult=await persistQualifiedB2CLead(db,campaign,scopedCandidate,qualification,{contactMobile:scopedPhone},true);
+  assert.equal(extraResult.created,true);
+  assert.equal(Number((await db('wasla_contact_audit').where({author_id:'38',action:'save',allowed:true}).count('* as n').first()).n),1,'duplicate primary phone is not reauthorized');
+  const scopedStored=await db('b2c_leads').where({author_id:38}).first(),scopedInventory=await db('lead_inventory').where({id:extraResult.inventoryId}).first();
+  assert.ok(!JSON.stringify([scopedStored,scopedInventory]).includes(deniedExtra),'denied extra phone cannot enter either storage payload');
+  await db.schema.alterTable('b2c_campaigns',t=>t.timestamp('created_at'));
+  await table('b2c_candidates',{uuid:['id','organization_id','campaign_id'],text:['candidate_key','author_username','title','body_text','city','status'],integer:['post_id','author_id','post_date','update_date'],jsonb:['tags','strategy','qualification','raw_payload'],timestamp:['created_at','updated_at']});
+  await db.schema.alterTable('b2c_candidates',t=>t.unique('candidate_key'));
+  const deploymentSmoke=await runDeploymentSmoke(db);
+  assert.equal(deploymentSmoke.candidateAuditSaved,true);
+  assert.equal(deploymentSmoke.syntheticPhoneRedacted,true);
+  assert.equal(deploymentSmoke.centralizedPolicyLoaded,true);
+  assert.equal(deploymentSmoke.syntheticRowsRolledBack,true);
+  assert.equal(deploymentSmoke.providerRequests,0);
+  assert.equal(Number((await db('b2c_candidates').count('* as n').first()).n),0);
+  globalThis.fetch=()=>{throw Error('Provider traffic forbidden');};
+  console.log('PASS provider policy: authorized GraphQL retrieval, actual storage/billing/export without personal grants, absent permission, explicit call denial, subject withdrawal and provider revocation.');
   console.log('PASS directory: actual save/billing/reveal/download without grant; no call scope; expiry, workspace/provider isolation, withdrawal and no fabricated consent.');
   console.log('PASS PostgreSQL: migrations twice; real transactions, signed event idempotency, shared/exclusive revocation locking, legacy export denial, append-only phone-free audit. No production rows or providers touched.');
 }finally{

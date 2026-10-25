@@ -202,8 +202,10 @@ test('AI transport failure is explicit, records its cause, and never uses local 
   const diagnostics = [];
   globalThis.fetch = async () => { throw new TypeError('fetch failed', { cause: { code: 'ENOTFOUND' } }); };
   try {
-    await assert.rejects(qualifyCandidates({ OPENAI_API_KEY: 'secret-primary', OPENROUTER_API_KEY: 'secret-secondary', __b2cDiagnostics: diagnostics }, [{ postId: 1, title: 'بي سي', bodyText: 'للبيع', matchedStrategy: { strategyType: 'OWNER_FALLBACK', searchTerm: 'بي سي' } }], { product: 'games', qualification: { minimumLeadScore: 65 } }), error => error.code === 'B2C_AI_UNAVAILABLE');
-    assert.equal(diagnostics.length, 2);
+    // Explicitly select the primary transport and omit backup credentials so
+    // this offline fixture cannot enter the native HTTPS fallback adapter.
+    await assert.rejects(qualifyCandidates({ OPENAI_API_KEY: 'secret-primary', B2C_OPENAI_QUALIFICATION_MODEL:'gpt-5-mini', B2C_OPENROUTER_QUALIFICATION_MODEL:'openai/gpt-5-mini', __b2cDiagnostics: diagnostics }, [{ postId: 1, title: 'بي سي', bodyText: 'للبيع', matchedStrategy: { strategyType: 'OWNER_FALLBACK', searchTerm: 'بي سي' } }], { product: 'games', qualification: { minimumLeadScore: 65 } }), error => error.code === 'B2C_AI_UNAVAILABLE');
+    assert.equal(diagnostics.length, 1);
     assert.ok(diagnostics.every(item => item.code === 'ENOTFOUND' && item.elapsedMs >= 0));
     assert.ok(!JSON.stringify(diagnostics).includes('secret-'));
   } finally { globalThis.fetch = originalFetch; }
@@ -218,7 +220,7 @@ test('a rate-limited primary is bypassed on following batches', async () => {
     fallback++; return Response.json({ choices: [{ message: { content: JSON.stringify({ items: [validReview(1)] }) } }] });
   };
   try {
-    const env = { OPENAI_API_KEY: 'cooldown-primary', OPENROUTER_API_KEY: 'cooldown-secondary' };
+    const env = { OPENAI_API_KEY: 'cooldown-primary', OPENROUTER_API_KEY: 'cooldown-secondary', B2C_OPENAI_QUALIFICATION_MODEL:'gpt-5-mini', B2C_OPENROUTER_QUALIFICATION_MODEL:'openai/gpt-5-mini' };
     for (let i = 0; i < 2; i++) assert.equal((await qualifyCandidates(env, [candidate], { qualification: { minimumLeadScore: 65 } }))[0].isQualified, true);
     assert.equal(primary, 1); assert.equal(fallback, 2);
   } finally { globalThis.fetch = originalFetch; }

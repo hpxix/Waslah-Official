@@ -54,16 +54,17 @@ assert.ok(runner.includes("authorizeContact:createContactAuthorizer(database,cam
 assert.ok(runner.includes('authorizeContactSave(trx,campaign.organization_id,candidate,phone'));
 assert.ok(runner.includes("candidate.matchedStrategy?.strategyType!=='PRODUCT_AD_FALLBACK'"),'no minimum score gate for keyword ads');
 assert.ok(runner.includes('plan.keywordMatching && !orderedFlow'),'legacy expansion cannot overwrite ordered strategies');
-const commentStats={};let lookups=0;
+const commentStats={};let lookups=0,phoneFreeCandidates=0;
 const comments=Array.from({length:300},(_,i)=>({id:i+1,authorId:i+1,authorUsername:`fixture-${i+1}`,body:'السلام عليكم',status:1}));
 const config={plan,stats:commentStats,target:30,options:{accountLimit:250,seedListingLimit:250,timeBudgetMs:300000},
  fetchSearch:async()=>({items:[{id:1,authorId:999,title:'منتج',bodyTEXT:'CCTV',commentEnabled:true,commentCount:300,city:'Riyadh'}],pageInfo:{hasNextPage:false}}),
  fetchComments:async()=>({items:comments,pageInfo:{hasNextPage:false}}),
  authorizeContact:async()=>{lookups++;return {allowed:false,detail:'consent_required'};},
- fetchProfile:async()=>{throw Error('Unauthorized contact retrieval');},fetchPosts:async()=>{throw Error('Unauthorized contact retrieval');},onCandidate:async()=>{throw Error('Unauthorized save');}};
+ fetchProfile:async()=>{throw Error('Unauthorized contact retrieval');},fetchPosts:async()=>{throw Error('Unauthorized contact retrieval');},onCandidate:async candidate=>{phoneFreeCandidates++;assert.equal(candidate.businessContact,null);return {created:false,reason:'no_authorized_contact'};}};
 await discoverCommentBuyers(config);
 assert.equal(commentStats.commentDiscovery.accountsProcessed,250);
 assert.equal(commentStats.commentDiscovery.stopReason,'account_limit');
 assert.equal(lookups,250);
+assert.equal(phoneFreeCandidates,250,'each rejected contact remains available for phone-free audit');
 await discoverCommentBuyers(config);assert.equal(lookups,250,'retry cannot process another 250');
-console.log('PASS: persistent 250 buyer listings -> 250 distinct commenter accounts -> 500 keyword listings; no cap overshoot; English/Arabic title/body keywords only; phone delivery and authorization remain separate.');
+console.log('PASS: persistent 250 buyer listings -> 250 distinct commenter accounts -> 500 keyword listings; no cap overshoot; phone-free auditing continues when contact authorization is absent.');

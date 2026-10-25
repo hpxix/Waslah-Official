@@ -1,5 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from "node:crypto";
 import { PassThrough } from "node:stream";
+import {deploymentBuild} from './deployment-build.js';
+import {runDeploymentSmoke} from './deployment-smoke.js';
 import { LIMITS_KEY, readListingLimits, validateListingLimits } from './b2c-limits.js';
 import { LITE_MODE_PREFIX, readLiteSearchMode, validateLiteSearchMode } from './lite-search-mode.js';
 import { routedChatModel, FRIENDLY_CHAT_TONE, smallTalkReply, chatQuestionReply } from './chat-model.js';
@@ -1924,6 +1926,7 @@ export default {
         data: {
           status: "ok",
           version: "2.0.0",
+          build: deploymentBuild,
           sms_provider: env.SMS_PROVIDER || "console",
           workflow_configured: Boolean(env.N8N_LEAD_AGENT_WEBHOOK_URL && env.N8N_WEBHOOK_SECRET),
           vapi_configured: Boolean(env.VAPI_API_KEY && env.VAPI_WEBHOOK_SECRET),
@@ -1936,6 +1939,11 @@ export default {
         },
       });
     }, logger));
+
+    router.post('/admin/deployment-smoke',route(async(req,res)=>{
+      await adminContext(database,req);
+      res.json({data:{build:deploymentBuild,...await runDeploymentSmoke(database)}});
+    },logger));
 
     router.get("/capabilities", route(async (req, res) => {
       const context = await chatContext(database, req);

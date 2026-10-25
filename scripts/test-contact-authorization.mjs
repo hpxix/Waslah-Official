@@ -46,7 +46,10 @@ assert.equal(known.contact,null);assert.equal(known.exclusions.at(-1).reason,'du
 assert.ok(!JSON.stringify(partial.exclusions).includes(phone));
 
 function databaseWith(rows){
-  const db=()=>{const q={where(){return q;},orderBy(){return q;},limit(){return q;},forShare(){db.locked=true;return q;},then(resolve,reject){return Promise.resolve(rows).then(resolve,reject);}};return q;};return db;
+  const db=table=>{
+    if(['wasla_provider_contact_permissions','haraj_contact_suppressions','haraj_business_publications'].includes(table)){const empty={where(){return empty;},whereNull(){return empty;},orderBy(){return empty;},first:async()=>undefined};return empty;}
+    const q={where(){return q;},orderBy(){return q;},limit(){return q;},forShare(){db.locked=true;return q;},then(resolve,reject){return Promise.resolve(rows).then(resolve,reject);}};return q;
+  };return db;
 }
 const db=databaseWith([record]);
 assert.equal((await createContactAuthorizer(db,'org',{lock:true,now:()=>now})({authorId:1,action:'save',phone})).allowed,true);
@@ -69,8 +72,8 @@ const stats={};
 await discoverCommentBuyers({plan:{keywordMatching:{productTerms:['كاميرات']},strategies:[{cities:['جدة']}]},target:1,stats,shouldStop:()=>false,
   fetchSearch:async()=>({items:[{id:20,authorId:99,title:'كاميرات',city:'جدة',commentEnabled:true,commentCount:1}],pageInfo:{hasNextPage:false}}),
   fetchComments:async()=>({items:[{id:1,authorId:1,authorUsername:'fixture',body:'بكم',status:1}],pageInfo:{hasNextPage:false}}),
-  fetchProfile:async()=>{fetched++;return profile('USER','');},fetchPosts:async()=>{fetched++;return {items:[]};},onCandidate:async()=>{saved++;return {created:true};}});
-assert.equal(fetched,0,'deny before phone-bearing requests');assert.equal(saved,0);
+  fetchProfile:async()=>{fetched++;return profile('USER','');},fetchPosts:async()=>{fetched++;return {items:[]};},onCandidate:async(candidate,qualification)=>{saved++;assert.equal(candidate.businessContact,null,'missing consent must produce a phone-free candidate');assert.equal(qualification.isQualified,true);return {created:false,reason:'no_authorized_contact'};}});
+assert.equal(fetched,0,'deny before phone-bearing requests');assert.equal(saved,1,'a denied phone lookup must not discard the qualified candidate');
 assert.equal(stats.commentDiscovery.contactExclusions[0].reason,'not_authorized');
 assert.ok(!JSON.stringify(stats).includes(phone));
 

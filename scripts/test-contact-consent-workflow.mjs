@@ -10,7 +10,16 @@ function fixtureDatabase(){
   const db=table=>{
     const filters=[],order=[];let maximum=Infinity;
     const rows=()=>{let selected=(tables[table]||[]).filter(row=>filters.every(test=>test(row)));for(const [key,direction] of [...order].reverse())selected=selected.slice().sort((a,b)=>String(a[key]).localeCompare(String(b[key]))*(direction==='desc'?-1:1));return selected.slice(0,maximum);};
-    const q={where(key,op,value){if(typeof key==='object')filters.push(row=>Object.entries(key).every(([k,v])=>row[k]===v));else filters.push(row=>op==='>'?row[key]>value:row[key]===value);return q;},whereIn(key,values){filters.push(row=>values.includes(row[key]));return q;},orderBy(key,direction){order.push([key,direction]);return q;},limit(n){maximum=n;return q;},forUpdate(){return q;},forShare(){return q;},select(){return q;},count(){return {first:async()=>({total:rows().length})};},first:async()=>structuredClone(rows()[0]),insert:async row=>{tables[table]||=[];tables[table].push(structuredClone(row));},update:async patch=>{const chosen=rows();for(const row of chosen)Object.assign(row,patch);return chosen.length;},then(resolve,reject){return Promise.resolve(structuredClone(rows())).then(resolve,reject);}};
+    const q={
+      where(key,op,value){if(typeof key==='object')filters.push(row=>Object.entries(key).every(([k,v])=>row[k]===v));else filters.push(row=>op==='>'?row[key]>value:op==='<='?row[key]<=value:row[key]===value);return q;},
+      whereNull(key){filters.push(row=>row[key]==null);return q;},
+      whereIn(key,values){filters.push(row=>values.includes(row[key]));return q;},
+      orderBy(key,direction){order.push([key,direction]);return q;},limit(n){maximum=n;return q;},forUpdate(){return q;},forShare(){return q;},select(){return q;},
+      count(){return {first:async()=>({total:rows().length})};},first:async()=>structuredClone(rows()[0]),
+      insert(row){tables[table]||=[];tables[table].push(structuredClone(row));return {onConflict:()=>({ignore:async()=>{}})};},
+      update:async patch=>{const chosen=rows();for(const row of chosen)Object.assign(row,patch);return chosen.length;},
+      then(resolve,reject){return Promise.resolve(structuredClone(rows())).then(resolve,reject);}
+    };
     return q;
   };
   db.isTransaction=true;db.raw=async(sql,bindings)=>{locks.push({sql,bindings});};

@@ -32,7 +32,7 @@ if (!decision?.allowed) {
 
 ## Trusted authorization contract
 
-`contact-authorization.js` reads backend-only `wasla_contact_authorizations` records. A trusted first-party ingestion must independently verify subject consent and supply organization, Haraj author ID, lead-generation purpose, permitted lookup/save/export actions, SHA-256 hashes of normalized authorized numbers, evidence reference, verifier, verification/grant times and expiry. The newest record supersedes all older records, including on revocation. Public availability, STORE status, keywords, customer account signup and a caller-supplied boolean do not grant permission.
+`contact-authorization.js` selects among reviewed provider permission, independently verified business publication, and backend-only subject grants. [Provider-level coverage](haraj-provider-contact-policy.md) does not require an individual consent record for covered operations. Subject grants still require trusted verification of the organization, Haraj author, purpose, action/number scope, evidence, and validity. Withdrawals override provider permission. Public availability, STORE status, keywords, customer signup, and caller-supplied booleans do not establish any of these bases.
 
 Migration: `directus/migrations/20261022_contact_authorizations.sql`. No consent-grant endpoint or fake records were added. Configure a genuine verified consent source before enabling this pipeline in production. Database deployment permissions must keep this registry server-only; it is not registered as a customer-editable Directus collection.
 

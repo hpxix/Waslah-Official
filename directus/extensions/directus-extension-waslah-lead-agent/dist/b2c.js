@@ -14,6 +14,7 @@ import { audienceRoute, audienceQuestion, routeMarker, routeFromPrompt, cameraKe
 import { BUSINESS_UNDERSTANDING_SCHEMA, businessUnderstandingQuestion, groundBusinessUnderstanding, missingBusinessUnderstanding } from './business-understanding.js';
 import { websiteAnalysisRequest } from './website-analysis.js';
 import { createContactAuthorizer, authorizeContactSave, authorizeContactExport, redactUnauthorizedContactData } from './contact-authorization.js';
+import {recordContactAuthorization,recordContactApiFailure} from './contact-diagnostics.js';
 import { runMahallyFallback } from './mahally.js';
 import { harajRuntime, harajDeadline, isHarajTimeLimit, harajTimeLimitMessage } from './haraj-runtime.js';
 import { liteDeliveryBlocker } from './lite-delivery-status.js';
@@ -1460,17 +1461,14 @@ function evidenceFrom(candidate, qualification) {
   };
 }
 
-async function saveCandidate(database, campaign, candidate, qualification) {
-  // Recheck current authorization under a transaction lock before any cache
-  // write. A cached number or previous successful run is not authorization.
+export async function saveCandidate(database, campaign, candidate, qualification) {
+  // Candidates are audit records, not contact records.  Discovery and
+  // qualification must remain useful when a subject has not authorized phone
+  // collection.  Strip every phone before persisting; authorization is checked
+  // later, at the phone retrieval and delivered-lead boundaries.
   if(!database.isTransaction)return database.transaction(trx=>saveCandidate(trx,campaign,candidate,qualification));
-  const phones=[...new Set([...(candidate.businessContact?.phones||[]),qualification.contactResolution?.phone].filter(Boolean))];
-  const authorize=createContactAuthorizer(database,campaign.organization_id,{lock:true});
-  const lookup=await authorize({authorId:candidate.authorId,action:'lookup'});
-  if(!lookup.allowed)return false;
-  for(const phone of phones)if(!(await authorize({authorId:candidate.authorId,action:'save',phone})).allowed)return false;
-  candidate=redactUnauthorizedContactData(candidate,phones);
-  qualification=redactUnauthorizedContactData(qualification,phones);
+  candidate=redactUnauthorizedContactData(candidate);
+  qualification=redactUnauthorizedContactData(qualification);
   const candidateKey = candidateStorageKey(campaign, candidate);
   const row = {
     id: randomUUID(), candidate_key: candidateKey, organization_id: campaign.organization_id, campaign_id: campaign.id,
@@ -1481,7 +1479,6 @@ async function saveCandidate(database, campaign, candidate, qualification) {
     raw_payload: dbJson(candidate), created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
   };
   await database("b2c_candidates").insert(row).onConflict("candidate_key").merge({ qualification: row.qualification, status: row.status, updated_at: row.updated_at });
-  return true;
 }
 
 function candidateStorageKey(campaign, candidate) {
@@ -1675,11 +1672,12 @@ export async function persistQualifiedB2CLead(database, campaign, candidate, qua
     if (!phone) throw new Error("Cannot save a Wasla-Lite lead without a valid Saudi mobile number.");
     const authorization=await authorizeContactSave(trx,campaign.organization_id,candidate,phone,{lock:true});
     if(!authorization.allowed)return detailed?{created:false,committedCount,reason:'not_authorized',detail:authorization.detail}:null;
-    for(const extra of candidate.businessContact?.phones||[]){
+    const allowedPhones=[phone];
+    for(const extra of new Set(candidate.businessContact?.phones||[])){
+      if(normalizeSaudiPhone(extra)===phone)continue;
       const permission=await authorizeContactSave(trx,campaign.organization_id,candidate,extra,{lock:true});
-      if(!permission.allowed)return detailed?{created:false,committedCount,reason:'not_authorized',detail:permission.detail}:null;
+      if(permission.allowed)allowedPhones.push(extra);
     }
-    const allowedPhones=[phone,...(candidate.businessContact?.phones||[])];
     candidate=redactUnauthorizedContactData(candidate,allowedPhones);
     qualification=redactUnauthorizedContactData(qualification,allowedPhones);
     contact=redactUnauthorizedContactData(contact,allowedPhones);
@@ -1772,6 +1770,7 @@ async function executeB2CCampaign({ database, env, campaignId, logger }) {
     contactErrors: Number(previousStats.contactErrors || 0),
     contactCandidatesProcessed: Number(previousStats.contactCandidatesProcessed || 0),
     contactExclusions: previousStats.contactExclusions || {},
+    authorizationDiagnostics: previousStats.authorizationDiagnostics || {candidatesDiscovered:0,uniqueQualifiedBuyers:0,decisionsByReason:{},eligiblePhoneLookups:0,successfulAuthorizedLookups:0,persistedDeliverableLeads:0},
     uniqueLeads: existingCount,
     hotLeads: Number(existingAggregate.find((row) => row.tier === "HOT")?.count || 0),
     warmLeads: Number(existingAggregate.find((row) => row.tier === "WARM")?.count || 0),
@@ -1971,16 +1970,39 @@ async function executeB2CCampaign({ database, env, campaignId, logger }) {
     stats.qualificationCacheHits = Number(previousStats.qualificationCacheHits || 0);
     stats.jevShadow = previousStats.jevShadow || { mode: "shadow", samples: [], counts: { PASS: 0, REJECT: 0, UNCERTAIN: 0 }, falseRejectAuditRate: null };
     stats.jevShadow.available = Boolean(env.B2C_JEV_OPENROUTER_API_KEY || env.AI_GATEWAY_API_KEY);
+    const authorizationDiagnostics=stats.authorizationDiagnostics;
+    authorizationDiagnostics.decisionsByReason ||= {};
+    authorizationDiagnostics.providerDecisionsByReason ||= {};
+    authorizationDiagnostics.individualConsentByReason ||= {};
+    authorizationDiagnostics.apiFailuresByReason ||= {};
+    const recordAuthorization=(decision,options)=>recordContactAuthorization(authorizationDiagnostics,decision,options);
     const scheduler = contactScheduler({
       target: Number(campaign.target_lead_count), initialCount: stats.uniqueLeads,
       concurrency: 4,
       process: async ({ candidate, qualification }) => {
         env.__b2cSignal?.throwIfAborted();
-        const lookup=await createContactAuthorizer(database,campaign.organization_id)({authorId:candidate.authorId,action:'lookup'});
-        if(!lookup.allowed){
+        const provider=candidate.contactSubject?.provider||'haraj';
+        const subject=candidate.contactSubject?.authorId||candidate.authorId;
+        const authorize=createContactAuthorizer(database,campaign.organization_id);
+        // Existing contact data needs save permission, not a redundant lookup
+        // grant. The centralized policy selects verified provider coverage,
+        // exact business-publication evidence, or subject consent.
+        let authorizedKnownContact=null;
+        for(const phone of candidate.businessContact?.phones||[]){
+          const decision=await authorize({authorId:subject,provider,action:'save',phone});
+          recordAuthorization(decision);
+          if(decision.allowed){authorizedKnownContact={phone:normalizeSaudiPhone(phone),contact:{contactMobile:phone},origin:candidate.businessContact.origin||'authorized_contact'};break;}
+        }
+        // This is the first point at which this path can retrieve a personal
+        // phone.  Keep the consent check here, rather than making listing
+        // discovery, matching, qualification, or candidate auditing depend on
+        // a phone authorization record.
+        const lookup=authorizedKnownContact?null:await authorize({authorId:subject,provider,action:'lookup'});
+        if(lookup)recordAuthorization(lookup,{lookup:true});
+        if(!authorizedKnownContact&&!lookup.allowed){
           stats.contactExclusions ||= {};
           stats.contactExclusions.not_authorized=Number(stats.contactExclusions.not_authorized||0)+1;
-          appendExecutionEvent(stats,'CONTACT_NOT_AUTHORIZED',{stage:stats.orderedAcquisition?.stage||'listings',reason:lookup.detail});
+          appendExecutionEvent(stats,'CONTACT_NOT_AUTHORIZED',{stage:stats.orderedAcquisition?.stage||'listings',reason:lookup.detail,providerReason:lookup.providerAuthorization?.detail,individualConsentReason:lookup.individualConsent?.detail});
           return {created:false,reason:'not_authorized',detail:lookup.detail};
         }
         if (alreadyDelivered(candidate)) {
@@ -1988,9 +2010,17 @@ async function executeB2CCampaign({ database, env, campaignId, logger }) {
           await candidateStatus(candidate, "REJECTED_ALREADY_DELIVERED");
           return { created: false, reason:'duplicate' };
         }
+        // Comment buyers can be qualified and audited without a contact.  Do
+        // not fall back to the source ad's seller contact: it belongs to a
+        // different Haraj subject and would turn a phone-free audit into an
+        // unrelated personal-phone retrieval.
+        if(candidate.buyerComment&&!candidate.businessContact?.phones?.length){
+          await candidateStatus(candidate, "REJECTED_NO_AUTHORIZED_CONTACT");
+          return {created:false,reason:'no_authorized_contact'};
+        }
         stats.contactCandidatesProcessed += 1;
         const contactKey = candidate.buyerComment ? `commenter:${candidate.authorId}` : candidate.postId;
-        let resolved = contacts.get(contactKey);
+        let resolved = authorizedKnownContact||contacts.get(contactKey);
         if (!resolved && candidate.buyerComment && candidate.businessContact?.phones?.length) {
           const phone = normalizeSaudiPhone(candidate.businessContact.phones[0]);
           if (phone) resolved = { phone, contact: { contactMobile: phone }, origin: candidate.businessContact.origin };
@@ -2013,11 +2043,13 @@ async function executeB2CCampaign({ database, env, campaignId, logger }) {
               const contact = await fetchHarajPostContact(env, candidate.postId);
               resolved = { contact, phone: resolvedCandidatePhone(contact, candidate), origin: "contact_endpoint" };
               stats.remoteContactHits += Number(Boolean(resolved.phone));
+              if(resolved.phone)recordAuthorization(lookup,{successfulLookup:true});
             } catch (error) {
               stats.contactErrors = Number(stats.contactErrors || 0) + 1;
               const status = Number(error?.status || 0) || null;
+              const apiFailure=recordContactApiFailure(authorizationDiagnostics,error);
               if (status === 401 || status === 403) stats.contactAuthentication = "rejected";
-              appendExecutionEvent(stats, "CONTACT_LOOKUP_FAILED", { postId: candidate.postId, status });
+              appendExecutionEvent(stats, "CONTACT_LOOKUP_FAILED", { postId: candidate.postId, status, reason:apiFailure });
               await candidateStatus(candidate, "CONTACT_ERROR");
               // Propagate provider safety stops instead of freeing the slot and
               // hammering the next candidate. Do not store raw provider errors.
@@ -2038,7 +2070,7 @@ async function executeB2CCampaign({ database, env, campaignId, logger }) {
         }
         recordDistinctPhones(stats, [resolved]);
         qualification.contactResolution = { phone: resolved.phone, origin: resolved.origin, resolvedAt: resolved.origin === "cached_contact" ? cachedContact.resolvedAt : new Date().toISOString() };
-        if(!await saveCandidate(database,campaign,candidate,qualification))return {created:false,reason:'not_authorized'};
+        await saveCandidate(database,campaign,candidate,qualification);
         const saveStarted = Date.now();
         const result = await persistQualifiedB2CLead(database, campaign, candidate, qualification,
           { ...resolved.contact, contactMobile: resolved.phone }, true, { signal: env.__b2cSignal });
@@ -2055,6 +2087,7 @@ async function executeB2CCampaign({ database, env, campaignId, logger }) {
         stats.hotLeads += Number(result.tier === "HOT");
         stats.warmLeads += Number(result.tier === "WARM");
         stats.firstLeadAt ||= new Date().toISOString();
+        authorizationDiagnostics.persistedDeliverableLeads=Number(authorizationDiagnostics.persistedDeliverableLeads||0)+1;
         const deliveredProgress = strategyProgress[candidate.matchedStrategy.pathId];
         if (deliveredProgress) deliveredProgress.deliveredCount += 1;
         stats.exactCountContract = { requested: Number(campaign.target_lead_count), delivered: stats.uniqueLeads, remaining: Math.max(0, Number(campaign.target_lead_count) - stats.uniqueLeads) };
@@ -2086,7 +2119,7 @@ async function executeB2CCampaign({ database, env, campaignId, logger }) {
         fetchPosts: (authorUsername, page) => fetchPublicHarajConnection(env, 'posts', AUTHOR_POSTS_QUERY, { authorUsername, page, limit: 20 }),
         extractPhone: publicSaudiPhone, checkpoint: flushStats,
         onCandidate: async (candidate, qualification) => {
-          if(!await saveCandidate(database,campaign,candidate,qualification))return {created:false,reason:'not_authorized'};
+          await saveCandidate(database,campaign,candidate,qualification);
           stats.candidatesQualified += 1;
           const before = scheduler.committed;
           const submission = await scheduler.submit({ candidate, qualification }, sellerKey(candidate));
@@ -2255,6 +2288,8 @@ async function executeB2CCampaign({ database, env, campaignId, logger }) {
         }
       }
       stats.uniqueCandidatesTotal += pending.length;
+      authorizationDiagnostics.candidatesDiscovered=Number(stats.postsFetched||0);
+      authorizationDiagnostics.uniqueQualifiedBuyers=Number(stats.candidatesQualified||0);
       await Promise.all(pageContacts);
       progress.reviewedPages += 1;
       progress.zeroYieldPages = pageQualified ? 0 : progress.zeroYieldPages + 1;

@@ -1,5 +1,6 @@
 import {createHash,createHmac,randomBytes,randomUUID,timingSafeEqual} from 'node:crypto';
 import {suppressMerchantDirectory} from './merchant-directory.js';
+import {suppressHarajBusinessDirectory} from './haraj-business-directory.js';
 import {CONTACT_ACTIONS,CONTACT_AUTHORIZATION_TABLE,contactPhoneHash,createContactAuthorizer,lockContactSubject,auditContactEvent,consentTime} from './contact-authorization.js';
 
 const REQUESTS='wasla_contact_consent_requests',EVENTS='wasla_contact_consent_events';
@@ -101,6 +102,7 @@ export function createConsentWorkflow({database,env,now=Date.now}){
         // workspace, not merely the latest receipt for the same number.
         await trx(CONTACT_AUTHORIZATION_TABLE).where({organization_id:authorization.organization_id,author_id:authorization.author_id,provider:authorization.provider}).update({status:'revoked',revoked_at:time()});
         if(authorization.provider==='mahally')await suppressMerchantDirectory(trx,authorization.organization_id,authorization.author_id);
+        if(authorization.provider==='haraj')await suppressHarajBusinessDirectory(trx,authorization.organization_id,authorization.author_id);
         await trx(REQUESTS).where({organization_id:authorization.organization_id,author_id:authorization.author_id,provider:authorization.provider,status:'pending'}).update({status:'cancelled',challenge_hash:null});
       }
       await trx(EVENTS).insert({event_id:eventId,receipt_digest:receiptDigest,processed_at:time(),authorization_id:authorization.id,event_type:body.type});
@@ -114,6 +116,7 @@ export function createConsentWorkflow({database,env,now=Date.now}){
     return database.transaction(async trx=>{
       await lockContactSubject(trx,organizationId,authorId,{exclusive:true,provider});
       if(provider==='mahally')await suppressMerchantDirectory(trx,organizationId,authorId);
+      if(provider==='haraj')await suppressHarajBusinessDirectory(trx,organizationId,authorId);
       await trx(CONTACT_AUTHORIZATION_TABLE).where({organization_id:organizationId,author_id:authorId,provider}).update({status:'revoked',revoked_at:time()});
       await trx(REQUESTS).where({organization_id:organizationId,author_id:authorId,provider,status:'pending'}).update({status:'cancelled',challenge_hash:null});
       await auditContactEvent(trx,{organization_id:organizationId,author_id:authorId,provider,actor:String(userId),event_type:'consent_revoked',detail:'workspace_subject_scopes_revoked'});

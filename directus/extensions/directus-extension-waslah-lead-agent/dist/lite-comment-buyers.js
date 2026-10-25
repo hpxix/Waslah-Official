@@ -2,7 +2,7 @@ import { includesTerm, keywordText } from './b2c-keywords.js';
 import { normalizePublicPhone, discoverProfileContacts, discoverPostContacts, selectAuthorizedContact, redactContactText } from './contact-discovery.js';
 export { normalizePublicPhone, discoverProfileContacts, discoverPostContacts, selectAuthorizedContact } from './contact-discovery.js';
 
-export const COMMENT_DISCOVERY_VERSION = 'consent-gated-comment-buyers-v3';
+export const COMMENT_DISCOVERY_VERSION = 'phone-gated-comment-buyers-v4';
 export const COMMENTS_QUERY = `query Comments($postId:Int!,$page:Int,$newestFirst:Boolean){comments(postId:$postId,page:$page,newestFirst:$newestFirst){items{id authorUsername authorId body status date isReply replyToCommentId} pageInfo{hasNextPage}}}`;
 export const PROFILE_QUERY = `query PublicProfile($id:ID!){profile(id:$id){id handler type contacts{type info description}}}`;
 export const AUTHOR_POSTS_QUERY = `query FetchAds($authorUsername:String,$page:Int,$limit:Int){posts(authorUsername:$authorUsername,page:$page,limit:$limit){items{id title bodyTEXT authorUsername authorId city geoCity URL} pageInfo{hasNextPage} viewOptions{mustLoginToView}}}`;
@@ -21,8 +21,10 @@ export function harajUrl(value) {
 const bounded=(value,fallback,max)=>Math.min(max,Math.max(1,Math.floor(Number(value)||fallback)));
 
 // All network functions are injected, and must use the shared provider guard.
-// Phone-bearing requests require prior verified authorization. An authorized
-// USER and STORE follow exactly the same discovery and eligibility paths.
+// Phone-bearing requests require prior verified authorization. Comment
+// discovery itself is phone-free: a consent decision can reject only the
+// contact retrieval for one commenter, never the listing, matching, or audit
+// pipeline for the rest of the batch.
 export async function discoverCommentBuyers({plan,stats,target,fetchSearch,fetchComments,fetchProfile,fetchPosts,authorizeContact=async()=>({allowed:false,detail:'authorization_unconfigured'}),onCandidate,shouldStop=()=>false,checkpoint=async()=>{},signal,options={}}) {
   const state=stats.commentDiscovery ||= {version:COMMENT_DISCOVERY_VERSION,requests:0,ads:0,comments:0,interested:0,publicBusinessContacts:0,delivered:0,seenAds:[],seenAuthors:[],complete:false};
   if(state.version!==COMMENT_DISCOVERY_VERSION && state.stopReason!=='target_reached'){
@@ -53,11 +55,24 @@ export async function discoverCommentBuyers({plan,stats,target,fetchSearch,fetch
   const call=async fn=>{if(!available())return null;state.requests++;const result=await fn();await checkpoint();return result;};
   const exclude=(authorId,reasons)=>{for(const reason of reasons){state.contactRejections[reason.reason]=(state.contactRejections[reason.reason]||0)+1;state.contactExclusions.push({authorId:String(authorId),reason:reason.reason,detail:reason.detail,stage:reason.stage||'authorization',source:reason.source||null});}state.contactExclusions=state.contactExclusions.slice(-200);};
   const finishAuthor=async comment=>{seenAuthors.add(String(comment.authorId));state.accountsProcessed++;state.seenAuthors=[...seenAuthors];state.pendingAuthors.shift();queuedAuthors.delete(String(comment.authorId));await checkpoint();};
+  const candidateFor=(comment,interest,ad,term,contact=null)=>{
+    const city=ad.city||ad.geoCity;
+    return {postId:ad.id,authorId:comment.authorId,authorUsername:comment.authorUsername,title:ad.title,bodyText:comment.body,city,geoCity:city,tags:ad.tags||[],postDate:comment.date,updateDate:comment.date,url:harajUrl(ad.URL),contactSubject:{provider:'haraj',authorId:comment.authorId},businessContact:contact,buyerComment:{id:comment.id,body:comment.body,date:comment.date,sourcePostId:ad.id,sourcePostUrl:harajUrl(ad.URL),sourcePostTitle:ad.title,marketCity:city,profileCity:contact?.profileCity||null,cityBasis:'source_listing_market',profileUrl:`https://haraj.com.sa/users/${encodeURIComponent(comment.authorUsername)}/`},matchedStrategy:{strategyType:'PRODUCT_COMMENT_BUYER',searchTerm:term,query:term,weight:1,pathId:'comment-buyers',phase:'comment-buyers',phaseIndex:-1}};
+  };
+  const qualificationFor=(comment,interest,ad)=>{const city=ad.city||ad.geoCity;return {isQualified:true,qualificationMode:COMMENT_DISCOVERY_VERSION,acceptanceBasis:'public_product_comment',verdict:'STRONG',score:interest.score,scoreMeaning:'evidence_tier_not_probability',grade:interest.grade,gradeBasis:interest.basis,identityConfidence:0,purchasePropensity:0,evidenceStrength:interest.score,marketplaceRole:'COMMENT_PROSPECT',matchedSignals:[comment.body],demandEvidence:interest.score>=90,supplyEvidence:false,explanation:`Public comment on a matching product listing: “${String(comment.body).slice(0,180)}”. Market: ${city}, from the source listing, not verified residence. Contact use requires verified authorization. A comment alone does not confirm current buying intent.`};};
   const resolveNext=async()=>{
     const item=state.pendingAuthors[0];if(!item||!available())return;
     const {comment,interest,ad,term}=item;
     const lookup=await authorizeContact({authorId:comment.authorId,action:'lookup'});
-    if(!lookup?.allowed){exclude(comment.authorId,[{reason:'not_authorized',detail:lookup?.detail||'consent_required'}]);await finishAuthor(comment);return;}
+    if(!lookup?.allowed){
+      // Preserve the qualified, phone-free candidate for audit and allow the
+      // caller to continue processing every remaining commenter.  Do not
+      // fetch a profile or posts that could expose a personal phone.
+      const result=await onCandidate(candidateFor(comment,interest,ad,term),qualificationFor(comment,interest,ad));
+      state.delivered+=Number(result?.created===true);
+      exclude(comment.authorId,[{reason:'not_authorized',detail:lookup?.detail||'consent_required'}]);
+      await finishAuthor(comment);return;
+    }
     let discovery;
     if(!item.profileChecked){
       const profile=await call(()=>fetchProfile(comment.authorId));
@@ -76,12 +91,17 @@ export async function discoverCommentBuyers({plan,stats,target,fetchSearch,fetch
     if(!contact&&!item.postsFinished){await checkpoint();return;}
     if(contact){
       state.publicBusinessContacts++;
-      const city=ad.city||ad.geoCity;
-      const qualification={isQualified:true,qualificationMode:COMMENT_DISCOVERY_VERSION,acceptanceBasis:'public_product_comment',verdict:'STRONG',score:interest.score,scoreMeaning:'evidence_tier_not_probability',grade:interest.grade,gradeBasis:interest.basis,identityConfidence:0,purchasePropensity:0,evidenceStrength:interest.score,marketplaceRole:'COMMENT_PROSPECT',matchedSignals:[comment.body],demandEvidence:interest.score>=90,supplyEvidence:false,explanation:`Public comment on a matching product listing: “${String(comment.body).slice(0,180)}”. Market: ${city}, from the source listing, not verified residence. Contact use requires verified authorization. A comment alone does not confirm current buying intent.`};
-      const candidate={postId:ad.id,authorId:comment.authorId,authorUsername:comment.authorUsername,title:ad.title,bodyText:comment.body,city,geoCity:city,tags:ad.tags||[],postDate:comment.date,updateDate:comment.date,url:harajUrl(ad.URL),businessContact:contact,buyerComment:{id:comment.id,body:comment.body,date:comment.date,sourcePostId:ad.id,sourcePostUrl:harajUrl(ad.URL),sourcePostTitle:ad.title,marketCity:city,profileCity:contact.profileCity,cityBasis:'source_listing_market',profileUrl:`https://haraj.com.sa/users/${encodeURIComponent(comment.authorUsername)}/`},matchedStrategy:{strategyType:'PRODUCT_COMMENT_BUYER',searchTerm:term,query:term,weight:1,pathId:'comment-buyers',phase:'comment-buyers',phaseIndex:-1}};
+      const qualification=qualificationFor(comment,interest,ad);
+      const candidate=candidateFor(comment,interest,ad,term,contact);
       const result=await onCandidate(candidate,qualification);state.delivered+=Number(result?.created===true);
       if(['duplicate','duplicated','not_authorized'].includes(result?.reason))exclude(comment.authorId,[{reason:result.reason==='duplicate'?'duplicated':result.reason,detail:result.detail||'persistence_check',stage:'save'}]);
-    } else state.contactRejections.noPublicBusinessContact++;
+    } else if(item.postsFinished){
+      // A qualified public comment is still worth auditing when no usable
+      // phone exists.  It must not be silently discarded with the contact.
+      const result=await onCandidate(candidateFor(comment,interest,ad,term),qualificationFor(comment,interest,ad));
+      state.delivered+=Number(result?.created===true);
+      state.contactRejections.noPublicBusinessContact++;
+    }
     await finishAuthor(comment);
   };
   let pagesThisPass=0,commentPagesThisPass=0,yielded=false;

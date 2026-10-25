@@ -1,7 +1,7 @@
 import {readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
-const paths=['directus/migrations/20261022_contact_authorizations.sql','directus/migrations/20261022_contact_consent_workflow.sql','directus/migrations/20261024_mahally_contact_provider.sql','directus/migrations/20261025_merchant_directory.sql'];
+const paths=['directus/migrations/20261022_contact_authorizations.sql','directus/migrations/20261022_contact_consent_workflow.sql','directus/migrations/20261024_mahally_contact_provider.sql','directus/migrations/20261025_merchant_directory.sql','directus/migrations/20261025_haraj_business_directory.sql','directus/migrations/20261025_provider_contact_permissions.sql'];
 const files=paths.map(path=>({path,sql:readFileSync(path,'utf8')}));
 console.log(JSON.stringify({migrations:files.map(({path,sql})=>({path,sha256:createHash('sha256').update(sql).digest('hex')})),mode:process.argv.includes('--apply')?'apply':'dry_run',consentRecordsCreated:0}));
 if(process.argv.includes('--apply')){

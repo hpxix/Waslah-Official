@@ -58,6 +58,7 @@ docker-data/
 directus/uploads/
 postgres_data/
 redis_data/
+.deployment-backups/
 
 # TypeScript / test artifacts
 

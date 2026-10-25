@@ -1,5 +1,11 @@
 # Haraj consent workflow v2
 
+This document describes the subject-consent authorization basis. It is not a
+requirement to obtain individual consent for operations covered by a reviewed
+[provider-level permission](haraj-provider-contact-policy.md). The shared
+authorizer also supports independently verified business publications. Provider
+coverage and subject withdrawals are checked by that same policy.
+
 ## Audit and plan
 
 The initial implementation separated classification-neutral discovery from eligibility, but had these availability and correctness problems:
