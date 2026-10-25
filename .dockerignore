@@ -4,6 +4,8 @@ dist
 .DS_Store
 .env
 .env.local
+.env.*
+!.env.*.example
 .env.relevance
 .env.*.local
 npm-debug.log*

@@ -3,6 +3,8 @@ const workflowSecret = process.env.N8N_WEBHOOK_SECRET || "replace-with-a-long-ra
 const runId = Date.now();
 const email = `smoke+${runId}@waslah.ai`;
 const password = "SmokeTest!123";
+const adminEmail = process.env.DIRECTUS_ADMIN_EMAIL;
+const adminPassword = process.env.DIRECTUS_ADMIN_PASSWORD;
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -37,6 +39,7 @@ async function main() {
       privacy_accepted: true,
       permissions_accepted: true,
       consent_version: "2026-08-20",
+      plan: "launch",
     },
   });
 
@@ -51,7 +54,18 @@ async function main() {
     token,
     body: { code: verification.dev_code },
   });
-  assert(verified.credited === true && verified.balance_sar === 30, "Welcome credit was not awarded exactly once.");
+  assert(verified.credited === false, "Phone verification must not grant free credit.");
+  const pending = await request("/lead-agent/me", { token });
+  assert(pending.subscription.status === "pending" && pending.wallet.balance === 0, "New workspace should be queued without credit.");
+  if (!adminEmail || !adminPassword) throw new Error("Set DIRECTUS_ADMIN_EMAIL and DIRECTUS_ADMIN_PASSWORD to test paid activation.");
+  const adminSession = await request("/auth/login", { method: "POST", body: { email: adminEmail, password: adminPassword, mode: "json" } });
+  const adminToken = adminSession.access_token;
+  const salesRequests = await request("/lead-agent/admin/sales-requests", { token: adminToken });
+  const sale = salesRequests.find((item) => item.email === email);
+  assert(sale?.status === "pending", "New workspace should appear in the sales queue.");
+  await request(`/lead-agent/admin/sales-requests/${sale.id}/activate`, { method: "POST", token: adminToken, body: {
+    plan: "launch", payment_received: true, payment_reference: `smoke-payment-${runId}`,
+  } });
 
   const leadRequest = await request("/lead-agent/requests", {
     method: "POST",
@@ -106,14 +120,14 @@ async function main() {
   assert(previews[0].revealed === false && previews[0].email.includes("***"), "Lead preview exposed private contact data.");
 
   const reveal = await request(`/lead-agent/leads/${previews[0].id}/reveal`, { method: "POST", token, body: {} });
-  assert(reveal.charged_sar === 1 && reveal.balance_sar === 29, "Lead reveal did not debit exactly 1 SAR.");
+  assert(reveal.charged_sar === 1 && reveal.balance_sar === 199, "Lead reveal did not debit exactly 1 SAR.");
   assert(reveal.lead.email.includes("@example.com"), "Revealed lead did not include full contact data.");
 
   const replay = await request(`/lead-agent/leads/${previews[0].id}/reveal`, { method: "POST", token, body: {} });
-  assert(replay.charged_sar === 0 && replay.balance_sar === 29, "Repeated reveal charged the wallet twice.");
+  assert(replay.charged_sar === 0 && replay.balance_sar === 199, "Repeated reveal charged the wallet twice.");
 
   const account = await request("/lead-agent/me", { token });
-  assert(account.phone_verified && account.wallet.balance === 29, "Final account state is inconsistent.");
+  assert(account.phone_verified && account.subscription.status === "active" && account.wallet.balance === 199, "Final account state is inconsistent.");
 
   console.log(JSON.stringify({
     status: "ok",

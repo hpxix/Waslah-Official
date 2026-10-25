@@ -1,4 +1,6 @@
 import axios from "axios";
+import { isSmallTalkTurn } from './chatBehavior';
+import {singleFlight} from './sessionRefresh';
 import type { B2CPlanning, CompanyResearch, IntakeState, Lead } from "../types";
 
 const directusUrl = (import.meta.env.VITE_DIRECTUS_URL as string | undefined) || "/directus";
@@ -24,6 +26,7 @@ export type AccountProfile = {
     credit_sar: number;
     included_leads: number;
   };
+  subscription: { status: "pending" | "active"; plan: "launch" | "scale" | "autopilot" | null };
   created_at: string;
   is_admin: boolean;
 };
@@ -115,6 +118,29 @@ export type AdminAccount = {
   created_at: string;
 };
 
+export type SalesAccessRequest = {
+  id: string;
+  plan: "launch" | "scale" | "autopilot" | null;
+  status: "pending" | "paid";
+  payment_reference: string | null;
+  paid_at: string | null;
+  created_at: string;
+  organization_name: string;
+  organization_status: string;
+  email: string;
+  phone_e164: string | null;
+};
+
+export function fetchSalesAccessRequests() {
+  return authenticatedRequest<SalesAccessRequest[]>("get", `${leadAgentPath}/admin/sales-requests`);
+}
+
+export function activateSalesAccessRequest(id: string, plan: "launch" | "scale" | "autopilot", paymentReference: string) {
+  return authenticatedRequest<SalesAccessRequest>("post", `${leadAgentPath}/admin/sales-requests/${encodeURIComponent(id)}/activate`, {
+    plan, payment_reference: paymentReference, payment_received: true,
+  });
+}
+
 export type AdminFeature = {
   key: string;
   name: string;
@@ -122,6 +148,7 @@ export type AdminFeature = {
   enabled_global: boolean;
   enabled: boolean;
   overridden: boolean;
+  admin_bypass?: boolean;
   configuration: Record<string, unknown>;
   updated_at: string;
 };
@@ -199,6 +226,7 @@ export type AdminB2CCampaign = {
   original_prompt: string;
   deal_intent: "buy" | "sell";
   status: string;
+  error_message?: string | null;
   target_count: number;
   delivered_count: number;
   intent: Record<string, unknown>;
@@ -283,6 +311,8 @@ export type B2CCampaign = {
   status: "DRAFT" | "READY" | "QUEUED" | "RUNNING" | "PAUSED" | "PARTIAL" | "COMPLETED" | "FAILED";
   stats: {
     postsFetched: number;
+    listingsFetchedTotal?: number;
+    listingLimitSnapshot?: number;
     candidatesQualified: number;
     contactsResolved: number;
     uniqueLeads: number;
@@ -294,6 +324,7 @@ export type B2CCampaign = {
     searchPass?: number;
     contactAttempts?: number;
     activeStrategyPhase?: string | null;
+    mahally?: { activity?: string; checked?: number; delivered?: number; pages?: number; complete?: boolean; stopReason?: string; exclusions?: Record<string, number> };
     fastPrefilterRejected?: number;
     executionLedger?: Array<{ code?: string; query?: string; phase?: string; returned?: number; shortlisted?: number; qualified?: number }>;
   };
@@ -312,9 +343,10 @@ type B2CLead = {
   id: string;
   inventoryId: string | null;
   sourceInternal: "b2c";
-  authorId: number | null;
   authorUsername: string | null;
   phone: string | null;
+  email: string | null;
+  website: string | null;
   city: string | null;
   score: number;
   tier: "HOT" | "WARM" | "EXPERIMENTAL";
@@ -323,13 +355,15 @@ type B2CLead = {
   marketplaceRole: string;
   explanation: string;
   evidence: Array<{
-    postId: number;
-    title: string;
     tags: string[];
     city: string | null;
     matchedSignals: string[];
     strategyType: string;
+    grade?: string;
+    buyerComment?: Lead['buyerComment'];
+    businessContact?: { phones: string[] };
   }>;
+  listing?: Lead["listing"];
   status: string;
   revealed: boolean;
   updatedAt: string;
@@ -552,24 +586,32 @@ const client = axios.create({
   withCredentials: true,
 });
 
-async function refreshSession() {
+const refreshSession = singleFlight(async () => {
   if (!directusUrl) return null;
   try {
-    const { data } = await client.post("/auth/refresh", { mode: "cookie" });
+    const perform = () => client.post('/auth/refresh', { mode: 'cookie' });
+    // Cookie rotation must also serialize across tabs. Tokens stay in memory;
+    // no credentials are broadcast or persisted to browser storage.
+    const { data } = typeof navigator !== 'undefined' && navigator.locks
+      ? await navigator.locks.request('wasla-session-refresh', perform) : await perform();
     accessToken = data?.data?.access_token;
     return accessToken || null;
   } catch {
     accessToken = undefined;
     return null;
   }
-}
+});
 
 async function authenticatedRequest<T>(method: "get" | "post" | "put" | "patch" | "delete", path: string, payload?: unknown): Promise<T> {
+  // Serialize once so the original request and an auth retry send identical,
+  // escaped JSON, including multiline chat transcripts and pasted characters.
+  const body = payload === undefined ? undefined : JSON.stringify(payload);
   const perform = (accessToken?: string) => client.request({
     method,
     url: path,
-    data: payload,
-    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+    data: body,
+    transformRequest: [(data) => data],
+    headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
   });
   let requestToken = accessToken;
   try {
@@ -577,7 +619,7 @@ async function authenticatedRequest<T>(method: "get" | "post" | "put" | "patch" 
     return data?.data ?? data;
   } catch (error) {
     if (!axios.isAxiosError(error) || error.response?.status !== 401) throw error;
-    requestToken = await refreshSession() || undefined;
+    requestToken = accessToken && accessToken !== requestToken ? accessToken : await refreshSession() || undefined;
     if (!requestToken) throw error;
     const { data } = await perform(requestToken);
     return data?.data ?? data;
@@ -594,7 +636,7 @@ async function authenticatedRaw<T>(path: string): Promise<T> {
     return data as T;
   } catch (error) {
     if (!axios.isAxiosError(error) || error.response?.status !== 401) throw error;
-    requestToken = await refreshSession() || undefined;
+    requestToken = accessToken && accessToken !== requestToken ? accessToken : await refreshSession() || undefined;
     if (!requestToken) throw error;
     const { data } = await perform(requestToken);
     return data as T;
@@ -624,7 +666,7 @@ export function getSocialIdentity() {
   return authenticatedRequest<SocialIdentity>("get", `${leadAgentPath}/auth/social/identity`);
 }
 
-export function completeSocialAccount(payload: { business: string; phone: string; locale: string; privacy_accepted: boolean; permissions_accepted: boolean; consent_version: string }) {
+export function completeSocialAccount(payload: { business: string; phone: string; locale: string; privacy_accepted: boolean; permissions_accepted: boolean; consent_version: string; plan?: "launch" | "scale" | "autopilot" | null }) {
   return authenticatedRequest<{ user_id: string; organization_id: string; profile_complete: boolean }>(
     "post",
     `${leadAgentPath}/auth/social/complete`,
@@ -641,6 +683,7 @@ export async function registerAccount(payload: {
   privacy_accepted: boolean;
   permissions_accepted: boolean;
   consent_version: string;
+  plan?: "launch" | "scale" | "autopilot" | null;
 }) {
   if (!directusUrl) throw new Error("Directus URL is not configured.");
   const { data } = await client.post(`${leadAgentPath}/auth/register`, payload);
@@ -684,8 +727,53 @@ export function fetchAdminFeatures(account?: string) {
   return authenticatedRequest<{ account: AdminAccount | null; features: AdminFeature[] }>("get", `${leadAgentPath}/admin/features${query}`);
 }
 
+export type B2CListingLimits = Record<30 | 50 | 200, number>;
+export type HarajSafetyLimits = { intervalMs: number; requestsPerDay: number; contactsPerDay: number; emptyContactLimit: number };
+export type HarajPerformance = {
+  generatedAt: string; windowHours: number; eventCapacity: number; sampleCount: number; successful: number; failed: number;
+  successRate: number | null; httpOkCount: number; medianMs: number | null; p95Ms: number | null; latencySampleCount: number;
+  dailyRequests: number; dailyContacts: number; day: string; maximumRequestsPerMinute: number; lastRequestAt: string | null;
+  risk: { score: number | null; level: 'unknown' | 'low' | 'elevated' | 'review'; reasons: string[] };
+};
+export type HarajSafetyState = {
+  paused: boolean; reason: string | null; retryAt: number | null; inFlight: boolean; alertEmailConfigured: boolean;
+  contactsPaused?: boolean; contactPauseReason?: string | null;
+  day: string; requests: number; contacts: number; emptyContacts: number;
+  limits: HarajSafetyLimits;
+  performance?: HarajPerformance;
+  events: Array<{ at: string; kind: string; outcome?: string; reason?: string; status?: number | null; durationMs?: number; diagnostic?: string; scope?: string }>;
+};
+export function fetchHarajSafety() {
+  return authenticatedRequest<HarajSafetyState>('get', `${leadAgentPath}/admin/haraj-safety`);
+}
+export function controlHarajSafety(action: 'pause' | 'resume' | 'configure', limits?: HarajSafetyLimits, confirmed = false, searchOnly = true) {
+  return authenticatedRequest<HarajSafetyState>('post', `${leadAgentPath}/admin/haraj-safety`, { action, limits, confirmed, searchOnly });
+}
+export function fetchB2CListingLimits() {
+  return authenticatedRequest<{ limits: B2CListingLimits; emergency_limit: number }>('get', `${leadAgentPath}/admin/b2c-listing-limits`);
+}
+export function saveB2CListingLimits(limits: B2CListingLimits) {
+  return authenticatedRequest<{ limits: B2CListingLimits; emergency_limit: number }>('put', `${leadAgentPath}/admin/b2c-listing-limits`, { limits });
+}
+
+export type LiteSearchMode = 'mixed' | 'comments_only' | 'listings_only';
+export function fetchLiteSearchMode(account: string) {
+  return authenticatedRequest<{ user_id: string; mode: LiteSearchMode }>('get', `${leadAgentPath}/admin/lite-search-mode?account=${encodeURIComponent(account)}`);
+}
+export function saveLiteSearchMode(account: string, mode: LiteSearchMode) {
+  return authenticatedRequest<{ user_id: string; mode: LiteSearchMode }>('put', `${leadAgentPath}/admin/lite-search-mode`, { account, mode });
+}
+
 export function updateAdminFeature(key: string, enabled_global: boolean) {
   return authenticatedRequest<AdminFeature>("patch", `${leadAgentPath}/admin/features/${encodeURIComponent(key)}`, { enabled_global });
+}
+
+export type AdminControlScope = { superior_access: boolean; customer_feature_locks_bypassed: boolean; platform_admin_url: string | null; controls: string[]; provider_restrictions_bypassed: boolean };
+export function fetchAdminControlScope() {
+  return authenticatedRequest<AdminControlScope>('get', `${leadAgentPath}/admin/control-scope`);
+}
+export function updateAdminFeatureSettings(key: string, payload: Pick<AdminFeature, 'name' | 'description' | 'configuration' | 'enabled_global'>) {
+  return authenticatedRequest<AdminFeature>('patch', `${leadAgentPath}/admin/features/${encodeURIComponent(key)}`, payload);
 }
 
 export function updateAdminFeatureOverride(key: string, account: string, enabled: boolean | null) {
@@ -700,7 +788,7 @@ export function createAdminProvider(payload: { key: string; name: string; actor_
   return authenticatedRequest<AdminProvider>("post", `${leadAgentPath}/admin/providers`, payload);
 }
 
-export function updateAdminProvider(id: string, payload: Partial<Pick<AdminProvider, "name" | "actor_id" | "enabled" | "priority">> & { token?: string }) {
+export function updateAdminProvider(id: string, payload: Partial<Pick<AdminProvider, "name" | "actor_id" | "enabled" | "priority" | "configuration">> & { token?: string }) {
   return authenticatedRequest<AdminProvider>("patch", `${leadAgentPath}/admin/providers/${encodeURIComponent(id)}`, payload);
 }
 
@@ -939,15 +1027,23 @@ export async function understandLeadAsk(message: string, transcript: string[]): 
 }
 
 export type WaslaConversationResult =
-  | { mode: "assistant"; text: string }
-  | { mode: "lead"; intake: IntakeState; text: string };
+  | { mode: "assistant"; text: string; tenderOffer?: TenderOffer }
+  | { mode: "lead"; intake: IntakeState; text: string; tenderOffer?: TenderOffer };
 
-async function chatWithWasla(message: string, transcript: string[], language: "ar" | "en", conversationId?: string, leadType?: "b2c" | "b2b" | null, objective?: "buy" | "sell", reasoningMode: "fast" | "high" = "high") {
-  return authenticatedRequest<{ text: string; intake?: IntakeState }>("post", `${leadAgentPath}/chat`, { message, transcript, language, conversation_id: conversationId, lead_type: leadType, deal_intent: objective, reasoning_mode: reasoningMode });
+export type TenderOffer = { query: string; model: 'astraeus' | 'ultra' };
+export type WebsiteRead = { id:string; url:string; status:'reading'|'completed'|'failed'; created_at:string; events:Array<{stage:string;detail:string;url:string;at:string}>; text?:string|null; error?:string|null; report?:{coverage:number;facts:Array<{field:string;text:string;sourceUrl:string;quote:string}>;missing:string[];pages:Array<{url:string;title:string}>;skipped:Array<{url:string;reason:string}>}|null };
+export const startWebsiteRead = (url:string,conversationId:string,language:'ar'|'en') => authenticatedRequest<WebsiteRead>('post',`${leadAgentPath}/website-reads`,{url,conversation_id:conversationId,language});
+export const fetchWebsiteRead = (id:string) => authenticatedRequest<WebsiteRead>('get',`${leadAgentPath}/website-reads/${encodeURIComponent(id)}`);
+export type TenderSearch = { id: string; status: string; error?: string | null; tenders: Array<{ title: string; agency: string; activity: string; location: string; deadline: string; reference: string; url: string; bookletPrice: number | null; requiredDocuments: string[] }> };
+export const startTenderSearch = (offer: TenderOffer, key: string) => authenticatedRequest<{id:string;status:string}>('post', `${leadAgentPath}/tenders`, { ...offer, idempotency_key: key });
+export const fetchTenderSearch = (id: string) => authenticatedRequest<TenderSearch>('get', `${leadAgentPath}/tenders/${encodeURIComponent(id)}`);
+
+async function chatWithWasla(message: string, transcript: string[], language: "ar" | "en", conversationId?: string, leadType?: "b2c" | "b2b" | null, objective?: "buy" | "sell", reasoningMode: "fast" | "high" = "high", modelChoice?: "b2c" | "b2b" | "ultra" | null) {
+  return authenticatedRequest<{ text: string; intake?: IntakeState; tenderOffer?: TenderOffer }>("post", `${leadAgentPath}/chat`, { message, transcript, language, conversation_id: conversationId, lead_type: leadType, deal_intent: objective, reasoning_mode: reasoningMode, model_choice: modelChoice });
 }
 
 async function chatWithB2CWasla(message: string, transcript: string[], language: "ar" | "en", conversationId?: string, objective?: "buy" | "sell", planning?: B2CPlanning, reasoningMode: "fast" | "high" = "high") {
-  return authenticatedRequest<{ text: string; planning: B2CPlanning | null; ready: boolean; missing: string[]; brief: string; stage?: string }>("post", `${leadAgentPath}/b2c/chat`, {
+  return authenticatedRequest<{ text: string; conversational?:boolean; planning: B2CPlanning | null; ready: boolean; missing: string[]; brief: string; businessUnderstanding?: IntakeState["businessUnderstanding"]; stage?: string }>("post", `${leadAgentPath}/b2c/chat`, {
     message,
     transcript,
     language,
@@ -967,11 +1063,13 @@ export async function converseWithWasla(
   leadType?: "b2c" | "b2b" | null,
   currentPlanning?: B2CPlanning,
   reasoningMode: "fast" | "high" = "high",
+  modelChoice?: "b2c" | "b2b" | "ultra" | null,
 ): Promise<WaslaConversationResult> {
-  const leadRequest = leadType ? message.trim().length >= 3 : isLeadSearchRequest(message);
+  const leadRequest = !isSmallTalkTurn(message) && (leadType ? message.trim().length > 0 : isLeadSearchRequest(message));
   if (leadRequest && leadType === "b2c") {
     try {
       const response = await chatWithB2CWasla(message, transcript, language, conversationId, objective, currentPlanning, reasoningMode);
+      if(response.conversational)return {mode:'assistant',text:response.text};
       if (!response.ready || !response.planning) {
         return {
           mode: "lead",
@@ -984,6 +1082,7 @@ export async function converseWithWasla(
             apifyInput: {},
             channel: "b2c",
             originalPrompt: response.brief || message,
+            businessUnderstanding: response.businessUnderstanding,
             ...(response.planning ? { b2cPlanning: response.planning } : {}),
           },
         };
@@ -999,57 +1098,24 @@ export async function converseWithWasla(
           apifyInput: {},
           channel: "b2c",
           originalPrompt: response.brief || message,
+          businessUnderstanding: response.businessUnderstanding,
           b2cPlanning: response.planning,
         },
       };
-    } catch {
-      const fallback = localB2CIntake(message, language);
-      return {
-        mode: "lead",
-        intake: fallback,
-        text: objective === "buy"
-          ? language === "ar"
-            ? "ما الذي تريد شراءه من الأفراد، وما أهم المواصفات أو الحالة أو الميزانية، وفي أي مدينة؟"
-            : "What do you want to buy from individuals, what specifications, condition, or budget matter, and in which city?"
-          : language === "ar"
-            ? "ما المنتج أو الخدمة التي تبيعها، ومن هو العميل المثالي لها، وفي أي مدينة؟"
-            : "What product or service are you selling, who is the ideal customer, and which city should we target?",
-      };
-    }
+    } catch (error) { throw error; }
   }
   try {
-    const chat = await chatWithWasla(message, transcript, language, conversationId, leadType, objective, reasoningMode);
+    const chat = await chatWithWasla(message, transcript, language, conversationId, leadType, objective, reasoningMode, modelChoice);
+    if (chat.tenderOffer && !chat.intake) return { mode: 'assistant', text: chat.text, tenderOffer: chat.tenderOffer };
     const intake = chat.intake || (leadRequest ? await understandLeadAsk(message, transcript) : null);
-    if (leadRequest && intake) return { mode: "lead", intake, text: chat.text };
-    return { mode: "assistant", text: chat.text };
-  } catch {
-    if (leadRequest) {
-      const intake = await understandLeadAsk(message, transcript);
-      return {
-        mode: "lead",
-        intake,
-        text: intake.confidence === 100
-          ? (language === "ar" ? `المهمة جاهزة: ${intake.summary}` : `Ready: ${intake.summary}`)
-          : (language === "ar" ? `ما زلنا نحتاج: ${intake.missing.join("، ")}.` : `Still missing ${intake.missing.join(", ")}.`),
-      };
-    }
+    if (leadRequest && intake) return { mode: "lead", intake, text: chat.text, tenderOffer: chat.tenderOffer };
+    return { mode: "assistant", text: chat.text, tenderOffer: chat.tenderOffer };
+  } catch (error) {
+    // A transport failure is not a new brief or an assistant answer.
+    // Let the view show a retry notice without replacing its saved context.
+    if (leadRequest) throw error;
     return { mode: "assistant", text: waslaProductAnswer(message, language) };
   }
-}
-
-function localB2CIntake(message: string, language: "ar" | "en"): IntakeState {
-  const product = message
-    .replace(/^\s*(?:find|search|source|generate|i\s+(?:sell|offer)|we\s+(?:sell|offer)|ابحث|اعثر|أبيع|ابيع|نبيع)\s+/i, "")
-    .trim();
-  return {
-    confidence: 34,
-    summary: product || (language === "ar" ? "عرضك للمستهلك" : "your consumer offer"),
-    missing: language === "ar" ? ["المنتج أو الخدمة", "العميل المثالي", "المدينة"] : ["product or service", "ideal customer", "city or region"],
-    apifyActor: "",
-    apifyInput: {},
-    channel: "b2c",
-    originalPrompt: message,
-  };
 }
 
 export function isLeadSearchRequest(message: string) {
@@ -1071,8 +1137,8 @@ function waslaProductAnswer(message: string, language: "ar" | "en") {
   }
   if (/credit|wallet|balance|lead cost|رصيد|محفظ|خصم|كم عميل/.test(value)) {
     return ar
-      ? "كل 10 أرصدة تساوي 1 ر.س وتكشف عميلاً واحداً. لا يُخصم شيء أثناء صياغة الطلب؛ الخصم يحدث فقط عند كشف سجل جديد، والسجل نفسه لا يُخصم مرتين. الحسابات الجديدة تحصل على 30 عميلاً مجاناً ورصيد 100 ر.س بعد توثيق الجوال."
-      : "Every 10 credits equal 1 SAR and reveal one lead. Drafting a request costs nothing; credit is charged only when a new record is revealed, and the same record is never charged twice. New accounts receive 30 free leads and 100 SAR credit after phone verification.";
+      ? "كل 10 أرصدة تساوي 1 ر.س وتكشف عميلاً واحداً. لا يُخصم شيء أثناء صياغة الطلب؛ الخصم يحدث فقط عند كشف سجل جديد، والسجل نفسه لا يُخصم مرتين. رصيد الباقة يُضاف بعد تأكيد استلام الدفعة كاملة."
+      : "Every 10 credits equal 1 SAR and reveal one lead. Drafting a request costs nothing; credit is charged only when a new record is revealed, and the same record is never charged twice. Plan credit is added after full payment is confirmed.";
   }
   if (/deep research|research|insight|بحث عميق|رؤى|تحليل/.test(value)) {
     return ar
@@ -1169,6 +1235,12 @@ type ApiWorkspaceLead = {
   company: string;
   email: string | null;
   phone: string | null;
+  phone_numbers?: Array<{ number: string; label: string }>;
+  contact_kind?: string | null;
+  contact_authorization?: Lead['contactAuthorization'];
+  contact_exclusions?: Lead['contactExclusions'];
+  lite_grade?: string | null;
+  buyer_comment?: Lead['buyerComment'];
   location: string | null;
   industry: string | null;
   source: string;
@@ -1184,6 +1256,7 @@ type ApiWorkspaceLead = {
   research_status?: Lead["researchStatus"];
   linkedin_url?: string | null;
   enrichment_summary?: string | null;
+  listing?: Lead["listing"];
 };
 
 function apiLeadToLead(row: ApiWorkspaceLead): Lead {
@@ -1196,7 +1269,14 @@ function apiLeadToLead(row: ApiWorkspaceLead): Lead {
     email: row.email || "",
     linkedinUrl: row.linkedin_url || undefined,
     qualificationReason: row.enrichment_summary || undefined,
+    listing: row.listing || null,
     phone: row.phone || undefined,
+    phoneNumbers: row.phone_numbers || [],
+    contactKind: row.contact_kind || undefined,
+    contactAuthorization: row.contact_authorization || null,
+    contactExclusions: row.contact_exclusions || [],
+    liteGrade: row.lite_grade || undefined,
+    buyerComment: row.buyer_comment || null,
     companyImageUrl: row.company_image_url || undefined,
     personImageUrl: row.person_image_url || undefined,
     website: row.website || undefined,
@@ -1221,11 +1301,37 @@ export async function fetchWorkspaceLeads(): Promise<Lead[]> {
   return rows.map(apiLeadToLead);
 }
 
+export type ContactConsentAction = 'lookup' | 'save' | 'reveal' | 'download' | 'call';
+export type ContactAuthorizationStatus = { allowed:boolean; status:string; detail?:string; authorizationId?:string; nextStep?:string; requiredActions?:ContactConsentAction[] };
+export type ContactConsentRequest = { id:string; authorId:string; status:string; actions:ContactConsentAction[]; consentUrl:string|null; verificationConfigured:boolean; expiresAt:string; grantExpiresAt:string; authorizationId:string|null; disclosure:Record<string,unknown> };
+export function requestContactConsent(authorId:string, actions:ContactConsentAction[], expiresAt:string) {
+  return authenticatedRequest<ContactConsentRequest>('post',`${leadAgentPath}/contact-consent/requests`,{author_id:authorId,actions,expires_at:expiresAt});
+}
+export function fetchContactConsentRequest(id:string) {
+  return authenticatedRequest<ContactConsentRequest>('get',`${leadAgentPath}/contact-consent/requests/${encodeURIComponent(id)}`);
+}
+export function checkContactAuthorization(authorId:string, action:ContactConsentAction, phone?:string) {
+  return authenticatedRequest<ContactAuthorizationStatus>('post',`${leadAgentPath}/contact-consent/status`,{author_id:authorId,action,phone});
+}
+export function revokeContactConsent(authorId:string) {
+  return authenticatedRequest<{status:string}>('post',`${leadAgentPath}/contact-consent/revoke`,{author_id:authorId});
+}
+export async function fetchAuthorizedDownloadLeads(ids:string[]):Promise<Lead[]> {
+  const result:Lead[]=[];
+  const unique=[...new Set(ids)];
+  for(let offset=0;offset<unique.length;offset+=200){
+    const rows=await authenticatedRequest<ApiWorkspaceLead[]>('post',`${leadAgentPath}/leads/export`,{lead_ids:unique.slice(offset,offset+200)});
+    result.push(...rows.map(apiLeadToLead));
+  }
+  return result;
+}
+
 export type LeadJob = {
   id: string;
   status: string;
   target_count: number;
   result_count: number;
+  sourceProgress?: { rawRecords: number; phoneRecords: number | null; potentialMatches: number; sourceAttempts: number; stopReason: string | null } | null;
   error_message?: string | null;
   provider?: string;
   provider_job_id?: string | null;
@@ -1234,13 +1340,33 @@ export type LeadJob = {
   updated_at?: string;
 };
 
+export type SignalPerson = {
+  id: string; name: string; headline: string; url: string; company: string; location: string;
+  fit: number | null; role: string; status: string; reason: string; email?: string; emailStatus?: string; provider?: string;
+  signals: Array<{ post: string; kind: string; text: string }>;
+};
+export type SignalRun = {
+  id: string; brief: string; topics: string[]; phase: string; status: string; message: string;
+  target: number; delivered: number; updatedAt: string;
+  spend: { tregMicro: number; budgetMicro: number; reservedMicro: number; jevMicro: number; jevCalls?: number; judge: string; aiCostUsd: number | null; inputTokens: number; outputTokens: number };
+  posts: Array<{ id: string; url: string; content: string; author: string; headline: string; likes: number;
+    comments: number; date: string; relevance: number | null; status: string; reason: string; suggested: boolean }>;
+  people: SignalPerson[]; events: Array<{ at: string; phase: string; message: string }>;
+};
+export const fetchSignalRun = (id: string) => authenticatedRequest<SignalRun>("get", `${leadAgentPath}/signal-runs/${encodeURIComponent(id)}`);
+export const cancelSignalRun = (id: string) => authenticatedRequest<{ status: string }>("post", `${leadAgentPath}/signal-runs/${encodeURIComponent(id)}/cancel`, {});
+export const fetchSignalConfig = () => authenticatedRequest<{ enabled: boolean; judge: string; dataBudgetUsd: number }>("get", `${leadAgentPath}/signal-runs/config`);
+export const fetchSignalRuns = () => authenticatedRequest<Array<{ id: string; query: string; status: string; delivered: number; target: number }>>("get", `${leadAgentPath}/signal-runs`);
+
 export type LeadRun = {
   id: string;
   type: "b2b" | "b2c";
+  contact_route?: "lite" | "astraeus" | "astraeus_ultra" | "legacy_b2b";
   title: string;
   query: string;
   deal_intent: "buy" | "sell";
   status: string;
+  error_message?: string | null;
   target_count: number;
   result_count: number;
   explanation: B2CExplanation | null;
@@ -1265,6 +1391,137 @@ export type BusinessDocument = {
 };
 
 export type BusinessPersona = { profile: GrowthBrandProfile; documents: BusinessDocument[] };
+
+export type LeadPipeline = {
+  stages: Array<{ id: string; name: string; position: number }>;
+  cards: Array<{ lead_id: string; stage_id: string; interest?: "interest" | "hot" | "not_interested" | null }>;
+};
+
+export type LeadPipelineEvent =
+  | { type: "connected" | "disconnected" | "resync" | "leads-changed" }
+  | { type: "stage-created"; stage: LeadPipeline["stages"][number] }
+  | { type: "card-moved"; card: LeadPipeline["cards"][number] };
+
+export function fetchLeadPipeline() {
+  return authenticatedRequest<LeadPipeline>("get", `${leadAgentPath}/pipeline`);
+}
+
+export type AstraeusRouterSettings = {
+  monthlyBudgetUsd: number;
+  astraeus: { enabled: boolean; maxRunUsd: number; minRating: number; candidateLimit: number };
+  ultra: { enabled: boolean; maxRunUsd: number; minRating: number; candidateLimit: number };
+};
+export type AstraeusRouterStatus = {
+  routing?: string;
+  sources?: Array<{ key: string; slug: string; kind: string; phones: boolean; limitation?: string }>;
+  settings: AstraeusRouterSettings; configured: boolean; connectionError: string | null;
+  budget: { total: number; used: number; remaining: number; cycle: string; activeJobs: number } | null;
+  runs: Array<{ request_id: string; model: string; reserved_usd: number; status: string; actor_id: string; run_id: string; created_at: string; audit: Record<string, unknown> | null }>;
+};
+export const fetchAstraeusRouter = () => authenticatedRequest<AstraeusRouterStatus>('get', `${leadAgentPath}/admin/astraeus`);
+export const updateAstraeusRouter = (settings: AstraeusRouterSettings) => authenticatedRequest<{ settings: AstraeusRouterSettings }>('put', `${leadAgentPath}/admin/astraeus`, { settings });
+
+export function createLeadPipelineStage(name: string) {
+  return authenticatedRequest<LeadPipeline["stages"][number]>("post", `${leadAgentPath}/pipeline/stages`, { name });
+}
+
+export function moveLeadPipelineCard(leadId: string, stageId: string, interest?: "interest" | "hot" | "not_interested") {
+  return authenticatedRequest<LeadPipeline["cards"][number]>("patch", `${leadAgentPath}/pipeline/leads/${encodeURIComponent(leadId)}`, { stage_id: stageId, ...(interest ? { interest } : {}) });
+}
+
+// A fetch-based SSE reader can send Directus' bearer token; EventSource cannot.
+// Reconnecting emits `connected` again, allowing callers to reload any changes
+// made while the browser was offline or the access token was being refreshed.
+export function subscribeLeadPipeline(onChange: (event: LeadPipelineEvent) => void): () => void {
+  let disposed = false;
+  let controller: AbortController | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let failures = 0;
+  let disconnectedSent = false;
+  const notify = (event: LeadPipelineEvent) => {
+    if (disposed) return;
+    try { onChange(event); } catch { /* A view callback must not break the stream. */ }
+  };
+  const connect = async () => {
+    if (disposed) return;
+    let retryImmediately = false;
+    try {
+      if (!accessToken) await refreshSession();
+      if (disposed) return;
+      const request = new AbortController();
+      controller = request;
+      const response = await fetch(client.getUri({ url: `${leadAgentPath}/pipeline/events` }), {
+        method: "GET",
+        headers: {
+          Accept: "text/event-stream",
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        },
+        credentials: "include",
+        cache: "no-store",
+        signal: request.signal,
+      });
+      if (response.status === 401) {
+        retryImmediately = Boolean(await refreshSession());
+        if (!retryImmediately) failures = Math.max(failures, 3);
+        return;
+      }
+      if (!response.ok || !response.body) throw new Error(`Pipeline stream returned ${response.status}`);
+      failures = 0;
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let eventName = "";
+      let dataLines: string[] = [];
+      const receiveLine = (rawLine: string) => {
+        const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+        if (!line) {
+          if (eventName === "pipeline" && dataLines.length) {
+            try {
+              const event = JSON.parse(dataLines.join("\n")) as LeadPipelineEvent;
+              if (event.type === "connected") disconnectedSent = false;
+              notify(event);
+            } catch { /* Ignore a malformed event; a reconnect will resync. */ }
+          }
+          eventName = "";
+          dataLines = [];
+        } else if (line.startsWith("event:")) {
+          eventName = line.slice(6).trim();
+        } else if (line.startsWith("data:")) {
+          dataLines.push(line.slice(5).trimStart());
+        }
+      };
+      while (!disposed) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let newline = buffer.indexOf("\n");
+        while (newline !== -1) {
+          receiveLine(buffer.slice(0, newline));
+          buffer = buffer.slice(newline + 1);
+          newline = buffer.indexOf("\n");
+        }
+      }
+    } catch {
+      // Network interruptions, expiring sessions, and server restarts reconnect.
+    } finally {
+      controller = null;
+      if (!disposed) {
+        if (!disconnectedSent) {
+          disconnectedSent = true;
+          notify({ type: "disconnected" });
+        }
+        const delay = retryImmediately ? 100 : Math.min(1_000 * 2 ** Math.min(failures++, 4), 15_000);
+        reconnectTimer = setTimeout(() => { reconnectTimer = null; void connect(); }, delay);
+      }
+    }
+  };
+  void connect();
+  return () => {
+    disposed = true;
+    controller?.abort();
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+  };
+}
 
 // READY means a brief/campaign exists but sourcing has not started. Treating it
 // as active caused every workspace visit to poll forever for a job doing no work.
@@ -1307,20 +1564,34 @@ export function continueB2CCampaign(campaignId: string) {
   return authenticatedRequest<B2CCampaign>("post", `${leadAgentPath}/b2c/campaigns/${encodeURIComponent(campaignId)}/run`, {});
 }
 
+export function stopB2CCampaign(campaignId: string) {
+  return authenticatedRequest<B2CCampaign>("post", `${leadAgentPath}/b2c/campaigns/${encodeURIComponent(campaignId)}/cancel`, {});
+}
+
 // Starting and observing are separate: leaving Chat or refreshing never launches a second paid search.
-export async function startLeadGeneration(intake: IntakeState, objective: "buy" | "sell", requestedCount: number): Promise<LeadJob> {
+export async function startLeadGeneration(intake: IntakeState, objective: "buy" | "sell", requestedCount: number, reasoningMode: "fast" | "high" = "high"): Promise<LeadJob> {
   const count = safeTargetCount(requestedCount);
   if (intake.channel === "b2c") {
     const campaign = await authenticatedRequest<B2CCampaign>("post", `${leadAgentPath}/b2c/campaigns`, {
       prompt: objective === "buy" ? `[PROCUREMENT_FROM_CONSUMERS] ${intake.originalPrompt || intake.summary}` : intake.originalPrompt || intake.summary,
       targetLeadCount: count, planning: intake.b2cPlanning,
+      reasoning_mode: reasoningMode, business_understanding: intake.businessUnderstanding,
     });
     const started = await authenticatedRequest<B2CCampaign>("post", `${leadAgentPath}/b2c/campaigns/${campaign.id}/run`, {});
     return { id: campaign.requestId, status: "sourcing", provider: "b2c", provider_job_id: campaign.id, target_count: count, result_count: 0, b2cCampaign: started };
   }
+  if (intake.model === "astraeus_ultra") {
+    const request = await createLeadRequest({
+      query: intake.summary,
+      criteria: { model: "astraeus_ultra", apify_input: intake.apifyInput, product_description: intake.productDescription || "", product_outcome: intake.productOutcome || "", reasoning_mode: reasoningMode, business_understanding: intake.businessUnderstanding, deal_intent: objective },
+      target_count: count,
+    });
+    if (!request.workflow_dispatched) throw new Error("Lead sourcing could not start. No credits have been charged.");
+    return { ...request, result_count: 0 };
+  }
   const request = await createLeadRequest({
     query: intake.summary,
-    criteria: { apify_actor: "compass/crawler-google-places", apify_input: { ...leadFinderInput(intake), maxCrawledPlacesPerSearch: count }, deal_intent: objective },
+    criteria: { model: 'astraeus', apify_input: intake.apifyInput, reasoning_mode: reasoningMode, business_understanding: intake.businessUnderstanding, deal_intent: objective },
     target_count: count,
   });
   if (!request.workflow_dispatched) throw new Error("Lead sourcing could not start. No credits have been charged.");
@@ -1337,6 +1608,8 @@ async function fetchB2CLeads(intake: IntakeState, requestedLeadCount: number, ob
     prompt: objective === "buy" ? `[PROCUREMENT_FROM_CONSUMERS] ${intake.originalPrompt || intake.summary}` : intake.originalPrompt || intake.summary,
     targetLeadCount,
     planning: intake.b2cPlanning,
+    reasoning_mode: "high",
+    business_understanding: intake.businessUnderstanding,
   });
   await authenticatedRequest<B2CCampaign>("post", `${leadAgentPath}/b2c/campaigns/${campaign.id}/run`, {});
   for (let attempt = 0; attempt < 90; attempt += 1) {
@@ -1346,23 +1619,30 @@ async function fetchB2CLeads(intake: IntakeState, requestedLeadCount: number, ob
       authenticatedRequest<B2CLead[]>("get", `${leadAgentPath}/b2c/campaigns/${campaign.id}/leads?limit=${targetLeadCount}`),
     ]);
     if (rows.length >= targetLeadCount || current.status === "COMPLETED" || current.status === "PARTIAL") return rows.map(b2cLeadToLead);
-    if (current.status === "FAILED") throw new Error(current.errorMessage || "B2C lead sourcing failed.");
+    if (current.status === "FAILED") throw new Error(current.errorMessage || "Wasla-Lite lead sourcing failed.");
   }
-  throw new Error("B2C sourcing is taking longer than expected. The campaign is still running in Leads.");
+  throw new Error("Wasla-Lite sourcing is taking longer than expected. The campaign is still running in Leads.");
 }
 
 function b2cLeadToLead(lead: B2CLead): Lead {
   const primaryEvidence = lead.evidence[0];
-  const username = lead.authorUsername || `B2C prospect ${lead.authorId || ""}`.trim();
+  const username = (lead.authorUsername || "")
+    .replace(/[0-9\u0660-\u0669\u06f0-\u06f9]/g, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ").trim() || "Wasla-Lite prospect";
   return {
     id: lead.inventoryId || lead.id,
     name: username,
-    title: lead.marketplaceRole === "SELLER"
-      ? (lead.tier === "HOT" ? "Matched individual seller" : "Potential individual seller")
-      : (lead.tier === "HOT" ? "High-intent consumer" : "Potential consumer"),
+    title: primaryEvidence?.buyerComment ? "Business contact" : "Founder",
     company: username,
-    email: "Protected until reveal",
+    email: lead.email || "",
     phone: lead.phone || undefined,
+    website: lead.website || undefined,
+    qualificationReason: lead.explanation || undefined,
+    liteGrade: primaryEvidence?.grade || undefined,
+    buyerComment: primaryEvidence?.buyerComment || null,
+    phoneNumbers: primaryEvidence?.businessContact?.phones?.map(number => ({ number, label: 'Phone' })) || [],
+    listing: lead.listing || null,
     location: lead.city || primaryEvidence?.city || "Saudi Arabia",
     source: "b2c",
     status: lead.tier === "HOT" ? "qualified" : "new",

@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import {singleFlight} from '../src/lib/sessionRefresh.ts';
+let calls=0, release;
+const refresh=singleFlight(async()=>{calls++;await new Promise(resolve=>{release=resolve;});return 'fixture-token';});
+const a=refresh(),b=refresh(),c=refresh();
+assert.equal(a,b);assert.equal(b,c);await Promise.resolve();assert.equal(calls,1);release();
+assert.deepEqual(await Promise.all([a,b,c]),['fixture-token','fixture-token','fixture-token']);
+const next=refresh();await Promise.resolve();assert.equal(calls,2);release();await next;
+let failures=0;
+const retry=singleFlight(async()=>{if(++failures===1)throw new Error('fixture');return 'recovered';});
+await assert.rejects(retry(),/fixture/);assert.equal(await retry(),'recovered');
+console.log('Session refresh: concurrent requests share one refresh; completion and failures release the flight for later retries.');

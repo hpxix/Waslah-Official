@@ -1,0 +1,36 @@
+import assert from 'node:assert/strict';
+import {scoreB2CCandidate, qualifyCandidates, admitOwnerProspect, recordDistinctPhones, freshStrategyPosts, shouldPauseForYield, shouldAttemptRemoteContact} from '../directus/extensions/directus-extension-waslah-lead-agent/dist/b2c.js';
+const strategy = {pathId:'test', searchTerm:'بن', strategyType:'OWNER_FALLBACK'};
+const plan = {product:'Coffee beans', dealIntent:'sell', strategies:[strategy], qualification:{minimumLeadScore:65}};
+const candidate = {postId:1,title:'عندي بن للبيع',bodyText:'كمية للاستخدام المنزلي',matchedStrategy:strategy};
+assert.equal(scoreB2CCandidate(candidate,plan).isQualified,true,'two-letter Arabic product survives');
+const pc = {...candidate,title:'PC للبيع',matchedStrategy:{...strategy,searchTerm:'PC'}};
+assert.equal(scoreB2CCandidate(pc,{...plan,strategies:[pc.matchedStrategy]}).isQualified,true);
+assert.equal(scoreB2CCandidate({...candidate,title:'بناء منزل',bodyText:''},plan).isQualified,false,'substring is not evidence');
+const stats = {};
+recordDistinctPhones(stats,[{phone:'+966500000001'},{phone:'+966500000001'}]);
+recordDistinctPhones(stats,[{phone:'+966500000001'},{phone:'+966500000002'}]);
+assert.equal(stats.contactsResolved,2);
+const progress = {};
+assert.equal(freshStrategyPosts(progress,[{id:1},{id:2}]).length,2);
+assert.equal(freshStrategyPosts(progress,[{id:2},{id:1}]).length,0);
+freshStrategyPosts(progress,[{id:1},{id:2}]);
+assert.equal(progress.exhaustedReason,'no_new_posts');
+assert.equal(shouldPauseForYield(strategy,{qualifiedCount:10,pagesFetched:20,zeroYieldPages:10,noLeadPages:10},2),false,'productive owner search is governed by listing cap, not a sparse-phone window');
+assert.equal(shouldPauseForYield(strategy,{qualifiedCount:0,pagesFetched:6,zeroYieldPages:6,noLeadPages:6},2),true,'irrelevant owner query still stops early');
+assert.equal(shouldAttemptRemoteContact({contactAttempts:99,remoteContactHits:0,contactCandidatesProcessed:99}),true);
+assert.equal(shouldAttemptRemoteContact({contactAttempts:100,remoteContactHits:0,contactCandidatesProcessed:101}),true,'shared budgets and deadline replace the fixed campaign ceiling');
+assert.equal(shouldAttemptRemoteContact({contactAttempts:100,contactLookupMode:'public_contacts_only'}),false,'current provider contact limits still stop lookups');
+assert.equal(shouldAttemptRemoteContact({contactAttempts:100,contactSafetyPause:{code:'HARAJ_SAFETY_PAUSED'}}),false,'provider pause still stops lookups');
+assert.equal(shouldAttemptRemoteContact({contactAttempts:1,contactAuthentication:'rejected'}),false,'authentication failure stops contact attempts');
+const oldFetch = globalThis.fetch;
+globalThis.fetch = async () => ({ok:true,json:async()=>({choices:[{message:{content:JSON.stringify({items:[{postId:1,scoreScale:100,verdict:'STRONG',score:80,identityConfidence:80,purchasePropensity:75,evidenceStrength:80,marketplaceRole:'OWNER',matchedSignals:['home brewing equipment'],negativeSignals:[],competitorProbability:5,irrelevantProbability:5,explanation:'Home espresso machine ownership supports coffee consumption.'}]})}}]})});
+try {
+  const semantic = {...candidate,title:'Home espresso machine',bodyText:'Personal household equipment'};
+  const [review] = await qualifyCandidates({OPENROUTER_API_KEY:'test'},[semantic],plan);
+  assert.equal(review.isQualified,true,'semantic evidence survives without literal keyword');
+  assert.equal(admitOwnerProspect(semantic,review).isQualified,true);
+  globalThis.fetch = async () => ({ok:false,status:402,json:async()=>({error:{message:'Insufficient credits'}})});
+  await assert.rejects(() => qualifyCandidates({OPENROUTER_API_KEY:'test'},[semantic],plan), error => error.code === 'B2C_AI_UNAVAILABLE');
+} finally { globalThis.fetch = oldFetch; }
+console.log('Reliability checks passed: short words, whole-word matching, distinct contacts, reordered duplicate pages, semantic qualification.');

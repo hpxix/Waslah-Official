@@ -1,40 +1,132 @@
 {
-  "generated_at": "2026-09-15T19:28:21.635858+00:00",
+  "generated_at": "2026-10-24T00:47:07.696972+00:00",
   "nodes": {
-    "src_app_app": {
-      "code_fingerprint": "c4b1b8bb82c94b4028dccd6191773a390984a6f6850e0366ec029c70bdde989e",
-      "label": "App()",
-      "last": "2026-09-15T19:12:53.102823+00:00",
+    "src_app": {
+      "code_fingerprint": "c0f6f4715ac856ba0319c4860e07e0957b3da27e63475ad5c2d18d17dd2ae6a1",
+      "label": "App.tsx",
+      "last": "2026-10-22T04:57:29.742732+00:00",
+      "neg": 1,
       "provenance": [
+        {
+          "date": "2026-10-22T04:57:29.742732+00:00",
+          "outcome": "useful",
+          "q": "Add an admin restriction-release button and Haraj API performance section with a risk meter and client performance controls"
+        },
+        {
+          "date": "2026-10-18T05:30:02.450539+00:00",
+          "outcome": "useful",
+          "q": "Locate existing Wasla subscription prices and features for marketing pricing updates"
+        },
+        {
+          "date": "2026-10-10T05:15:09.293045+00:00",
+          "outcome": "useful",
+          "q": "Implement the approved compact Wasla chat model selector"
+        }
+      ],
+      "score": 1.603074432,
+      "source_file": "src/App.tsx",
+      "status": "contested",
+      "uses": 3,
+      "verdict": "useful"
+    },
+    "src_app_app": {
+      "code_fingerprint": "c0f6f4715ac856ba0319c4860e07e0957b3da27e63475ad5c2d18d17dd2ae6a1",
+      "label": "App()",
+      "last": "2026-10-22T03:44:01.594127+00:00",
+      "provenance": [
+        {
+          "date": "2026-10-22T03:44:01.594127+00:00",
+          "outcome": "useful",
+          "q": "Chat shrinks depending on sidebar and messages; restore stable chat sizing and CRM icon"
+        },
+        {
+          "date": "2026-10-10T05:15:09.293045+00:00",
+          "outcome": "useful",
+          "q": "Implement the approved compact Wasla chat model selector"
+        },
+        {
+          "date": "2026-09-15T22:57:25.667333+00:00",
+          "outcome": "useful",
+          "q": "Implement per-run B2B and B2C lead libraries, Business Persona uploads, and a complete admin B2C query audit while making B2C fully functional"
+        },
         {
           "date": "2026-09-15T19:12:53.102823+00:00",
           "outcome": "useful",
           "q": "add logout button fast. no yapping just add it in the front-end"
         }
       ],
-      "score": 0.999751724,
+      "score": 2.512592946,
+      "source_file": "src/App.tsx",
+      "status": "preferred",
+      "uses": 4
+    },
+    "src_app_consoleshell": {
+      "code_fingerprint": "c0f6f4715ac856ba0319c4860e07e0957b3da27e63475ad5c2d18d17dd2ae6a1",
+      "label": "ConsoleShell()",
+      "last": "2026-10-22T03:44:01.594127+00:00",
+      "provenance": [
+        {
+          "date": "2026-10-22T03:44:01.594127+00:00",
+          "outcome": "useful",
+          "q": "Chat shrinks depending on sidebar and messages; restore stable chat sizing and CRM icon"
+        }
+      ],
+      "score": 0.957555625,
+      "source_file": "src/App.tsx",
+      "status": "tentative",
+      "uses": 1
+    },
+    "src_app_sidebarmetaltoggle": {
+      "code_fingerprint": "c0f6f4715ac856ba0319c4860e07e0957b3da27e63475ad5c2d18d17dd2ae6a1",
+      "label": "SidebarMetalToggle()",
+      "last": "2026-10-22T03:44:01.594127+00:00",
+      "provenance": [
+        {
+          "date": "2026-10-22T03:44:01.594127+00:00",
+          "outcome": "useful",
+          "q": "Chat shrinks depending on sidebar and messages; restore stable chat sizing and CRM icon"
+        }
+      ],
+      "score": 0.957555625,
       "source_file": "src/App.tsx",
       "status": "tentative",
       "uses": 1
     },
     "src_lib_directus": {
-      "code_fingerprint": "006907bfd64feee471b18b72c19b0a72f7ebbd257ee6fd4f5e49dc3e0f450282",
+      "code_fingerprint": "b7a6bf7edd3d620492568bb94a0be1f54fab6685373125dd28d840bd10fda36d",
       "label": "directus.ts",
-      "last": "2026-09-15T19:12:53.102823+00:00",
+      "last": "2026-10-22T04:57:29.742732+00:00",
+      "neg": 2,
       "provenance": [
+        {
+          "date": "2026-10-22T04:57:29.742732+00:00",
+          "outcome": "useful",
+          "q": "Add an admin restriction-release button and Haraj API performance section with a risk meter and client performance controls"
+        },
+        {
+          "date": "2026-10-14T16:09:33.430986+00:00",
+          "outcome": "useful",
+          "q": "ok, now explain how does the astraeus & astraeus-ultra model works on wasla"
+        },
+        {
+          "date": "2026-09-15T22:57:25.667333+00:00",
+          "outcome": "useful",
+          "q": "Implement per-run B2B and B2C lead libraries, Business Persona uploads, and a complete admin B2C query audit while making B2C fully functional"
+        },
         {
           "date": "2026-09-15T19:12:53.102823+00:00",
           "outcome": "useful",
           "q": "add logout button fast. no yapping just add it in the front-end"
         }
       ],
-      "score": 0.999751724,
+      "score": 0.678163229,
       "source_file": "src/lib/directus.ts",
-      "status": "tentative",
-      "uses": 1
+      "status": "contested",
+      "uses": 4,
+      "verdict": "useful"
     },
     "src_lib_directus_accountprofile": {
-      "code_fingerprint": "006907bfd64feee471b18b72c19b0a72f7ebbd257ee6fd4f5e49dc3e0f450282",
+      "code_fingerprint": "b7a6bf7edd3d620492568bb94a0be1f54fab6685373125dd28d840bd10fda36d",
       "label": "AccountProfile",
       "last": "2026-09-14T16:02:50.087050+00:00",
       "provenance": [
@@ -44,45 +136,73 @@
           "q": "Continue the dashboard and add admin controls for global/per-account B2B and B2C access, Apify APIs, chat outcomes, B2C sourcing rationale, credit adjustments, and AI-understood account data with instant changes."
         }
       ],
-      "score": 0.973942918,
+      "score": 0.402724061,
       "source_file": "src/lib/directus.ts",
       "status": "tentative",
       "uses": 1
     },
     "src_lib_directus_chatwithwasla": {
-      "code_fingerprint": "006907bfd64feee471b18b72c19b0a72f7ebbd257ee6fd4f5e49dc3e0f450282",
+      "code_fingerprint": "b7a6bf7edd3d620492568bb94a0be1f54fab6685373125dd28d840bd10fda36d",
       "label": "chatWithWasla()",
-      "last": "2026-09-14T16:02:50.087050+00:00",
+      "last": "2026-10-14T16:09:33.430986+00:00",
       "provenance": [
+        {
+          "date": "2026-10-14T16:09:33.430986+00:00",
+          "outcome": "useful",
+          "q": "ok, now explain how does the astraeus & astraeus-ultra model works on wasla"
+        },
         {
           "date": "2026-09-14T16:02:50.087050+00:00",
           "outcome": "useful",
           "q": "Continue the dashboard and add admin controls for global/per-account B2B and B2C access, Apify APIs, chat outcomes, B2C sourcing rationale, credit adjustments, and AI-understood account data with instant changes."
         }
       ],
-      "score": 0.973942918,
+      "score": 1.208259066,
       "source_file": "src/lib/directus.ts",
-      "status": "tentative",
-      "uses": 1
+      "status": "preferred",
+      "uses": 2
     },
     "src_lib_directus_fetchapifyleads": {
-      "code_fingerprint": "006907bfd64feee471b18b72c19b0a72f7ebbd257ee6fd4f5e49dc3e0f450282",
+      "code_fingerprint": "b7a6bf7edd3d620492568bb94a0be1f54fab6685373125dd28d840bd10fda36d",
       "label": "fetchApifyLeads()",
-      "last": "2026-09-14T16:02:50.087050+00:00",
+      "last": "2026-10-19T22:50:22.576911+00:00",
+      "neg": 1,
       "provenance": [
+        {
+          "date": "2026-10-14T16:09:33.430986+00:00",
+          "outcome": "useful",
+          "q": "ok, now explain how does the astraeus & astraeus-ultra model works on wasla"
+        },
         {
           "date": "2026-09-14T16:02:50.087050+00:00",
           "outcome": "useful",
           "q": "Continue the dashboard and add admin controls for global/per-account B2B and B2C access, Apify APIs, chat outcomes, B2C sourcing rationale, credit adjustments, and AI-understood account data with instant changes."
         }
       ],
-      "score": 0.973942918,
+      "score": 0.298242903,
+      "source_file": "src/lib/directus.ts",
+      "status": "contested",
+      "uses": 2,
+      "verdict": "useful"
+    },
+    "src_lib_directus_leadrequestreceipt": {
+      "code_fingerprint": "b7a6bf7edd3d620492568bb94a0be1f54fab6685373125dd28d840bd10fda36d",
+      "label": "LeadRequestReceipt",
+      "last": "2026-09-15T22:57:25.667333+00:00",
+      "provenance": [
+        {
+          "date": "2026-09-15T22:57:25.667333+00:00",
+          "outcome": "useful",
+          "q": "Implement per-run B2B and B2C lead libraries, Business Persona uploads, and a complete admin B2C query audit while making B2C fully functional"
+        }
+      ],
+      "score": 0.414888039,
       "source_file": "src/lib/directus.ts",
       "status": "tentative",
       "uses": 1
     },
     "src_lib_directus_logoutaccount": {
-      "code_fingerprint": "006907bfd64feee471b18b72c19b0a72f7ebbd257ee6fd4f5e49dc3e0f450282",
+      "code_fingerprint": "b7a6bf7edd3d620492568bb94a0be1f54fab6685373125dd28d840bd10fda36d",
       "label": "logoutAccount()",
       "last": "2026-09-15T19:12:53.102823+00:00",
       "provenance": [
@@ -92,7 +212,7 @@
           "q": "add logout button fast. no yapping just add it in the front-end"
         }
       ],
-      "score": 0.999751724,
+      "score": 0.413395968,
       "source_file": "src/lib/directus.ts",
       "status": "tentative",
       "uses": 1

@@ -1,0 +1,6 @@
+**
+!dist
+!dist/**
+!infra
+!infra/nginx
+!infra/nginx/default.conf

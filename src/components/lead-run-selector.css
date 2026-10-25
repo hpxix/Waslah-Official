@@ -1,0 +1,46 @@
+/* Compact shadcn/Radix history control. No query-card carousel. */
+#root .search-history { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px 20px; min-height:66px; padding:14px 20px; border-block-end:1px solid #ffffff0d; background:#121212; }
+#root .search-history__controls { display:flex; align-items:center; gap:14px; min-width:0; max-width:100%; }
+#root .search-history__all { display:inline-flex; flex:0 0 auto; align-items:center; gap:8px; height:34px; min-height:34px; padding:0 10px; border:1px solid transparent; border-radius:6px; background:transparent; color:#92929c; font-size:12px; font-weight:500; box-shadow:none; }
+#root .search-history__all[aria-pressed="true"] { color:#ededf0; background:#ffffff07; border-color:#ffffff0d; }
+#root .search-history__all [data-slot="badge"] { padding:0 5px; min-height:18px; border:0; border-radius:4px; background:#ffffff09; color:#a1a1aa; font-size:10px; font-variant-numeric:tabular-nums; }
+#root .search-history__all > svg { color:#9c9ca5; }
+#root .search-history__divider { flex-shrink:0; height:18px; width:1px; background:#ffffff12; }
+#root .search-history__trigger { display:inline-flex; align-items:center; justify-content:flex-start; gap:9px; width:300px; max-width:100%; min-width:0; height:34px; min-height:34px; padding:0 10px; border:1px solid #ffffff18; border-radius:6px; background:#181818; color:#c4c4cb; font-size:12px; font-weight:400; box-shadow:0 1px 2px #00000030; transition:border-color 120ms ease,background-color 120ms ease; }
+#root .search-history__trigger:hover,#root .search-history__trigger[data-state="open"] { border-color:#ffffff32; background:#202020; }
+#root .search-history__trigger:focus-visible,#root .search-history__all:focus-visible { outline:2px solid #bdbdc6; outline-offset:3px; }
+#root .search-history__trigger > svg { color:#85858f; }
+#root .search-history__trigger-title { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:start; }
+#root .search-history__model { color:#a1a1aa; border-color:#ffffff16; border-radius:4px; background:transparent; padding:0 5px; font-size:9px; line-height:16px; }
+#root .search-history__summary { display:flex; align-items:center; gap:12px; color:#777781; font-size:11px; line-height:18px; }
+#root .search-history__summary-dot { width:4px; height:4px; background:#777781; border-radius:50%; }
+#root .search-history__summary-count { padding-inline-start:12px; border-inline-start:1px solid #ffffff14; color:#85858f; }
+#root .search-history__summary-count bdi { color:#c4c4cb; font-variant-numeric:tabular-nums; }
+.search-history-menu[data-slot="dropdown-menu-content"] { z-index:100; width:360px; max-width:calc(100vw - 24px); padding:5px; border:1px solid #ffffff1b; border-radius:9px; background:#191919; color:#e4e4e7; box-shadow:0 12px 36px #00000060,0 2px 6px #00000030; font-family:inherit; animation:search-history-in 110ms ease-out; transform-origin:var(--radix-dropdown-menu-content-transform-origin); }
+.search-history-menu [data-slot="dropdown-menu-separator"] { margin:5px 2px; background:#ffffff10; }
+.search-history-menu__label { display:flex; align-items:center; justify-content:space-between; padding:7px 9px; color:#8b8b96; font-size:10px; font-weight:500; }
+.search-history-menu__label > span:last-child { color:#666671; font-variant-numeric:tabular-nums; }
+.search-history-menu__list { max-height:min(320px,calc(var(--radix-dropdown-menu-content-available-height) - 105px)); overflow-y:auto; overscroll-behavior:contain; scrollbar-width:thin; scrollbar-color:#37373d transparent; }
+.search-history-menu [data-slot="dropdown-menu-radio-item"] { gap:9px; border-radius:5px; color:#c6c6ce; cursor:pointer; }
+.search-history-menu [data-slot="dropdown-menu-radio-item"][data-highlighted] { background:#ffffff08; outline:none; }
+.search-history-menu [data-slot="dropdown-menu-radio-item"][data-state="checked"] { background:#ffffff06; }
+.search-history-menu [data-slot="dropdown-menu-radio-item"] > span:first-child { color:#ffff86; }
+.search-history-menu .search-history-menu__all { padding-block:8px; font-size:12px; }
+.search-history-menu__all-count { margin-inline-start:auto; color:#85858f; font-size:11px; }
+.search-history-menu .search-history-menu__item { min-height:59px; padding-block:9px; padding-inline-end:10px; align-items:center; }
+.search-history-menu__copy { flex:1; min-width:0; display:flex; flex-direction:column; gap:5px; }
+.search-history-menu__title { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#dedee4; font-size:12px; font-weight:450; line-height:18px; text-align:start; }
+.search-history-menu__meta { display:flex; align-items:center; gap:6px; color:#7e7e89; font-size:10px; line-height:14px; }
+.search-history-menu__result { flex:0 0 auto; display:flex; flex-direction:column; align-items:flex-end; gap:4px; }
+.search-history-menu__result > bdi { color:#bfbfc8; font-size:11px; line-height:17px; font-variant-numeric:tabular-nums; }
+.search-history-menu__result > bdi > span { color:#6f6f7b; }
+.search-history__status { display:inline-flex; align-items:center; gap:5px; font-size:10px; line-height:15px; color:#868690; white-space:nowrap; }
+.search-history__status > i { width:4px; height:4px; border-radius:50%; background:#74747f; }
+.search-history__status[data-tone="live"] > i { background:#ffff86; }
+.search-history__status[data-tone="live"] { color:#c4c4a6; }
+.search-history-menu__empty { padding:12px 9px; color:#85858f; font-size:12px; }
+.search-history-menu[dir="rtl"] [data-slot="dropdown-menu-radio-item"] { padding-left:10px; padding-right:32px; }
+.search-history-menu[dir="rtl"] [data-slot="dropdown-menu-radio-item"] > span:first-child { left:auto; right:8px; }
+@keyframes search-history-in { from { opacity:0; transform:translateY(-3px); } to { opacity:1; transform:translateY(0); } }
+@media (max-width:640px) { #root .search-history { padding:12px; gap:9px; } #root .search-history__controls { width:100%; gap:9px; } #root .search-history__trigger { flex:1; width:auto; } #root .search-history__summary { display:none; } #root .search-history__all { padding-inline:7px; gap:6px; } }
+@media (prefers-reduced-motion:reduce) { .search-history-menu[data-slot="dropdown-menu-content"] { animation:none; } #root .search-history__trigger { transition:none; } }

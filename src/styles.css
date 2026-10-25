@@ -12,6 +12,9 @@
   grid-template-columns: 64px minmax(0, 1fr);
 }
 
+html {
+  background: #08090a; /* your app background */
+}
 #root .secure-rail {
   background: #050505;
   border-right-color: #2a2a2a;
@@ -121,7 +124,7 @@
   background: #050505;
 }
 #root .avatar-mark svg {
-  background: #087a4f;
+  background: #ffff51;
   border: 2px solid #fff;
   bottom: -7px;
   color: #fff;
@@ -150,7 +153,7 @@
 }
 #root .auth-status-strip .done {
   background: #e4f0e9;
-  color: #076843;
+  color: #ffff51;
 }
 #root .auth-mode-tabs {
   background: #efefed;
@@ -182,7 +185,7 @@
   border-radius: 4px;
 }
 #root .otp-card span {
-  color: #087a4f;
+  color: #ffff51;
 }
 #root .create-account,
 #root .fetch-button,
@@ -194,7 +197,7 @@
   color: #fff;
 }
 #root .fetch-button {
-  background: #087a4f;
+  background: #ffff51;
   color: #fff;
 }
 #root .wallet-link {
@@ -469,7 +472,7 @@
   border-radius: 0;
   box-shadow: none;
   color: var(--ops-text);
-  margin: 0 -28px;
+  margin: 0;
   position: sticky;
   top: 0;
   z-index: 20;
@@ -1356,7 +1359,9 @@
   border-radius: 6px;
   display: grid;
   gap: 8px;
-  grid-template-columns: minmax(240px, 1fr) minmax(230px, 1fr) repeat(3, minmax(120px, auto)) auto;
+  grid-template-columns:
+    minmax(240px, 1fr) minmax(230px, 1fr) repeat(3, minmax(120px, auto))
+    auto;
   padding: 8px;
   position: sticky;
   top: 72px;
@@ -1631,11 +1636,23 @@
   grid-template-columns: auto minmax(0, 1fr);
   min-width: 0;
 }
-#root .admin-lead-card__assignment svg { color: var(--ops-subtle); grid-row: 1 / span 2; }
+#root .admin-lead-card__assignment svg {
+  color: var(--ops-subtle);
+  grid-row: 1 / span 2;
+}
 #root .admin-lead-card__assignment strong,
-#root .admin-lead-card__assignment small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#root .admin-lead-card__assignment strong { font-size: 10px; }
-#root .admin-lead-card__assignment small { color: var(--ops-muted); font-size: 9px; }
+#root .admin-lead-card__assignment small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#root .admin-lead-card__assignment strong {
+  font-size: 10px;
+}
+#root .admin-lead-card__assignment small {
+  color: var(--ops-muted);
+  font-size: 9px;
+}
 #root .admin-lead-card__signals span {
   align-items: center;
   color: #aeb2b7;
@@ -2065,7 +2082,7 @@
     grid-column: 1 / -1;
   }
   #root .hconsole-topbar {
-    margin: 0 -16px;
+    margin: 0;
   }
   #root .hconsole-topbar > [data-slot="card-content"] {
     padding: 8px 16px;
@@ -2233,7 +2250,7 @@
   --wasla-line: #dedede;
   --wasla-paper: #ffffff;
   --wasla-fog: #f3f3f1;
-  --wasla-live: #087a4f;
+  --wasla-live: #ffff51;
 }
 
 .wasla-brand {
@@ -2783,7 +2800,7 @@
 
 .auth-status-strip .done {
   background: #e4f0e9;
-  color: #076843;
+  color: #ffff51;
 }
 
 .auth-mode-tabs {
@@ -2826,7 +2843,7 @@
 }
 
 .otp-card span {
-  color: #087a4f;
+  color: #ffff51;
 }
 
 .create-account,
@@ -3224,8 +3241,8 @@ button {
 
 button:hover:not(:disabled),
 button.active {
-  border-color: #24786d;
-  color: #115f56;
+  border-color: #ffff51;
+  color: #d4d4d8;
 }
 
 button:disabled {
@@ -3234,8 +3251,8 @@ button:disabled {
 }
 
 .primary {
-  background: #24786d;
-  border-color: #24786d;
+  background: #ffff51;
+  border-color: #ffff51;
   color: white;
 }
 
@@ -3336,7 +3353,7 @@ button:disabled {
     ),
     radial-gradient(
       circle at 92% 8%,
-      rgba(216, 255, 114, 0.055),
+      rgba(255, 255, 81, 0.055),
       transparent 30%
     ),
     #050505;
@@ -3513,7 +3530,7 @@ button:disabled {
 }
 
 .hconsole-metric svg {
-  color: #d8ff72;
+  color: #ffff51;
 }
 
 .hconsole-metric span {
@@ -3550,7 +3567,7 @@ button:disabled {
 }
 
 .hconsole [role="progressbar"] > * {
-  background: linear-gradient(90deg, #d8ff72, #72d7ff);
+  background: linear-gradient(90deg, #ffff51, #72d7ff);
   border-radius: 999px;
   height: 100%;
 }
@@ -4215,7 +4232,7 @@ button:disabled {
 
 .auth-panel {
   background:
-    linear-gradient(160deg, rgba(216, 255, 114, 0.18), transparent 31%),
+    linear-gradient(160deg, rgba(255, 255, 81, 0.18), transparent 31%),
     linear-gradient(25deg, rgba(114, 215, 255, 0.15), transparent 42%), #101010;
   border-color: rgba(255, 255, 255, 0.13);
   box-shadow:
@@ -4269,7 +4286,7 @@ button:disabled {
       rgba(255, 255, 255, 0.92),
       transparent 17%
     ),
-    linear-gradient(135deg, #d8ff72, #72d7ff);
+    linear-gradient(135deg, #ffff51, #72d7ff);
   border: 1px solid rgba(255, 255, 255, 0.38);
   border-radius: 24px;
   box-shadow: 0 18px 52px rgba(114, 215, 255, 0.18);
@@ -4318,14 +4335,14 @@ button:disabled {
       rgba(255, 255, 255, 0.92),
       transparent 17%
     ),
-    linear-gradient(135deg, #d8ff72, #ffffff);
+    linear-gradient(135deg, #ffff51, #ffffff);
 }
 
 .avatar-mark svg {
   background: #050505;
   border-radius: 999px;
   bottom: -5px;
-  color: #d8ff72;
+  color: #ffff51;
   padding: 3px;
   position: absolute;
   right: -5px;
@@ -4390,8 +4407,8 @@ button:disabled {
 }
 
 .auth-status-strip .done {
-  background: rgba(216, 255, 114, 0.16);
-  color: #d8ff72;
+  background: rgba(255, 255, 81, 0.16);
+  color: #ffff51;
 }
 
 .auth-fields {
@@ -4462,7 +4479,7 @@ button:disabled {
 }
 
 .otp-card span {
-  color: #d8ff72;
+  color: #ffff51;
   font-size: 12px;
 }
 
@@ -4521,7 +4538,7 @@ button:disabled {
 }
 
 .fetch-button {
-  background: #d8ff72;
+  background: #ffff51;
 }
 
 .fetch-button:disabled {
@@ -4580,7 +4597,7 @@ button:disabled {
     ),
     radial-gradient(
       circle at 16% 84%,
-      rgba(36, 120, 109, 0.32),
+      rgba(255, 255, 81, 0.32),
       transparent 30%
     ),
     linear-gradient(135deg, #08110f 0%, #132a27 42%, #0c1718 100%);
@@ -4632,7 +4649,7 @@ button:disabled {
 }
 
 .landing-brand span {
-  background: linear-gradient(135deg, #f4ab5b, #24786d);
+  background: linear-gradient(135deg, #f4ab5b, #ffff51);
   border-radius: 8px;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.26);
   color: #07110f;
@@ -4670,7 +4687,7 @@ button:disabled {
   background: rgba(255, 255, 255, 0.09);
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 999px;
-  color: #cbe9df;
+  color: #ffff51;
   display: inline-flex;
   gap: 8px;
   padding: 9px 13px;
@@ -4723,7 +4740,7 @@ button:disabled {
   background: linear-gradient(
     135deg,
     rgba(244, 171, 91, 0.82),
-    rgba(36, 120, 109, 0.88)
+    rgba(255, 255, 81, 0.88)
   );
   border-radius: 50%;
   box-shadow: 0 34px 90px rgba(0, 0, 0, 0.38);
@@ -4811,9 +4828,9 @@ button:disabled {
 }
 
 .live-pill span {
-  background: #62e6a3;
+  background: #ffff51;
   border-radius: 50%;
-  box-shadow: 0 0 18px #62e6a3;
+  box-shadow: 0 0 18px #ffff51;
   height: 8px;
   width: 8px;
 }
@@ -4921,7 +4938,7 @@ button:disabled {
 }
 
 .landing-confidence div {
-  background: linear-gradient(90deg, #f4ab5b, #62e6a3);
+  background: linear-gradient(90deg, #f4ab5b, #ffff51);
 }
 
 .signal-list {
@@ -4932,10 +4949,10 @@ button:disabled {
 }
 
 .signal-list span {
-  background: rgba(98, 230, 163, 0.12);
-  border: 1px solid rgba(98, 230, 163, 0.2);
+  background: rgba(255, 255, 81, 0.12);
+  border: 1px solid rgba(255, 255, 81, 0.2);
   border-radius: 999px;
-  color: #c8f8df;
+  color: #ffff51;
   font-size: 12px;
   padding: 6px 9px;
 }
@@ -5009,12 +5026,12 @@ nav {
 
 .nav-link.active,
 .nav-link:hover {
-  background: #244844;
+  background: #27272a;
   color: white;
 }
 
 .product-card {
-  border: 1px solid #38615b;
+  border: 1px solid #3f3f46;
   border-radius: 8px;
   margin-top: auto;
   padding: 16px;
@@ -5044,7 +5061,7 @@ nav {
 .missing-list span {
   background: #e7f0ed;
   border-radius: 999px;
-  color: #24786d;
+  color: #ffff51;
   display: inline-flex;
   font-size: 12px;
   padding: 5px 9px;
@@ -5135,7 +5152,7 @@ h3 {
 }
 
 .metric svg {
-  color: #24786d;
+  color: #ffff51;
 }
 
 .metric strong {
@@ -5226,7 +5243,7 @@ textarea {
 }
 
 .confidence div {
-  background: #24786d;
+  background: #ffff51;
   height: 100%;
   transition: width 200ms ease;
 }
@@ -5239,8 +5256,8 @@ textarea {
 }
 
 .missing-list .ready {
-  background: #dff5e8;
-  color: #177241;
+  background: #ffff51;
+  color: #ffff51;
 }
 
 pre {
@@ -5305,7 +5322,7 @@ pre {
 }
 
 .score span {
-  background: #24786d;
+  background: #ffff51;
   border-radius: 999px;
   display: block;
   height: 8px;
@@ -5329,8 +5346,8 @@ pre {
 
 .status.qualified,
 .status.won {
-  background: #dff5e8;
-  color: #177241;
+  background: #ffff51;
+  color: #ffff51;
 }
 
 .status.proposal {
@@ -5400,7 +5417,7 @@ pre {
 }
 
 .proposal > span {
-  color: #24786d;
+  color: #ffff51;
   font-weight: 700;
 }
 

@@ -1,0 +1,65 @@
+.haraj-console { display:grid;gap:20px;color:#ececee;min-width:0 }
+.haraj-console button,.haraj-dialog button { display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1px solid #38383f;border-radius:9px;background:#232327;color:#e5e5e9;padding:10px 14px;font:inherit;font-size:12px;cursor:pointer }
+.haraj-console button:hover,.haraj-dialog button:hover { background:#303035 }
+.haraj-console button:disabled,.haraj-dialog button:disabled { opacity:.4;cursor:not-allowed }
+.haraj-console button.is-primary,.haraj-dialog button.is-primary { background:#ffff51;color:#171719;border-color:#ffff51;font-weight:650 }
+.haraj-console :is(button,input):focus-visible,.haraj-dialog :is(button,input):focus-visible { outline:2px solid #b39aff;outline-offset:3px }
+.haraj-console__heading,.haraj-status { display:flex;justify-content:space-between;align-items:center;gap:20px }
+.haraj-console h2 { font-size:26px;letter-spacing:-.03em;margin:8px 0 }
+.haraj-console h3 { font-size:17px;margin:10px 0 }
+.haraj-console p,.haraj-dialog p { color:#a2a2ad;font-size:12px;line-height:1.8;margin:6px 0 }
+.haraj-eyebrow { display:inline-flex;align-items:center;gap:8px;font-size:10px;letter-spacing:.08em;color:#aaaab4 }
+.haraj-status { border:1px solid #363639;border-radius:14px;padding:20px;background:#17171a }
+.haraj-status > div:first-child { display:flex;align-items:flex-start;gap:12px }
+.haraj-status code { font-size:11px;color:#bda3ff }
+.haraj-status__dot { display:block;flex:0 0 8px;height:8px;background:#ffff51;border-radius:100%;margin-top:6px;box-shadow:0 0 0 5px #ffff5110 }
+.haraj-status__dot.is-paused { background:#b59aff;box-shadow:0 0 0 5px #b59aff15 }
+.haraj-actions { display:flex;flex-wrap:wrap;align-items:center;gap:10px }
+.haraj-actions > span { font-size:11px;color:#bda3ff }
+.haraj-metrics { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px }
+.haraj-metric { display:grid;gap:12px;padding:20px;background:#17171a;border:1px solid #303035;border-radius:13px;min-width:0 }
+.haraj-metric > span { display:flex;gap:8px;align-items:center;font-size:11px;color:#a1a1ad }
+.haraj-metric strong { font-size:clamp(18px,2vw,27px);letter-spacing:-.04em;text-align:start;font-variant-numeric:tabular-nums }
+.haraj-metric small { font-size:10px;color:#858590;line-height:1.6 }
+.haraj-console__grid { display:grid;grid-template-columns:minmax(250px,.8fr) minmax(0,1.2fr);gap:16px }
+.haraj-card { background:#141416;border:1px solid #303035;border-radius:15px;padding:22px;min-width:0 }
+.haraj-risk__score { display:flex;align-items:center;justify-content:space-between;gap:16px;margin:22px 0 }
+.haraj-risk__score > strong { font-size:60px;line-height:1;font-weight:600;letter-spacing:-.06em }
+.haraj-risk__score small { font-size:14px;letter-spacing:0;color:#81818d;margin-inline-start:5px }
+.haraj-risk__score > span { color:#c0a8ff;font-size:12px;border:1px solid #b59aff40;background:#b59aff10;padding:7px 10px;border-radius:7px }
+.haraj-risk__track { height:8px;border-radius:5px;background:#323237;overflow:hidden;margin-bottom:18px }
+.haraj-risk__track i { display:block;height:100%;background:#b59aff;border-radius:inherit;transition:width .2s ease }
+.haraj-risk.is-low .haraj-risk__track i { background:#ffff51 }
+.haraj-risk ul { padding-inline-start:18px;margin:18px 0;color:#d0ced9;font-size:12px;line-height:2 }
+.haraj-risk__details { border-top:1px solid #303035;margin-top:20px;padding-top:14px;display:grid;gap:12px }
+.haraj-risk__details > span { display:flex;justify-content:space-between;gap:12px;font-size:11px;color:#9999a5 }
+.haraj-risk__details b { color:#dedee5;font-weight:500 }
+.haraj-presets { display:flex;gap:7px;flex-wrap:wrap;margin:18px 0 }
+.haraj-fields { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 14px;margin:20px 0 }
+.haraj-fields label { display:grid;gap:8px;align-content:start }
+.haraj-fields label > span { color:#aaaab5;font-size:11px;line-height:1.6 }
+.haraj-fields input { box-sizing:border-box;width:100%;min-width:0;background:#202024;border:1px solid #3e3e47;color:#ededf1;border-radius:8px;padding:11px 12px;font:inherit;font-variant-numeric:tabular-nums }
+.haraj-alert { border:1px solid #45424e;padding:12px 16px;background:#b59aff08;border-radius:10px }
+.haraj-alert.is-error { border-color:#a35b6355 }
+.haraj-events__scroll { overflow:auto;max-height:420px;margin-top:20px }
+.haraj-events table { width:100%;min-width:620px;border-collapse:collapse;font-size:11px;text-align:start }
+.haraj-events th { position:sticky;top:0;z-index:1;text-align:start;color:#8f8f9c;font-size:10px;font-weight:500;padding:10px 12px;background:#1e1e22 }
+.haraj-events td { border-bottom:1px solid #29292f;padding:13px 12px;color:#cccbd4 }
+.haraj-events td:first-child { white-space:nowrap;color:#91919d;font-variant-numeric:tabular-nums }
+.haraj-events td small { display:block;color:#a3a0b1;font-size:10px;margin-top:5px }
+.haraj-event-error { color:#f3a6b3 !important }
+.haraj-telemetry-note { margin-top:16px !important;font-size:10px !important }
+.haraj-dialog-overlay { position:fixed;inset:0;background:#000b;backdrop-filter:blur(5px);z-index:300 }
+.haraj-dialog { position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:301;box-sizing:border-box;width:min(540px,calc(100vw - 28px));max-height:calc(100dvh - 40px);overflow-y:auto;padding:30px;background:#18181c;color:#ededf0;border:1px solid #42424b;border-radius:18px;box-shadow:0 30px 100px #0009;font-family:inherit }
+.haraj-dialog h2 { font-size:22px;margin:0 25px 15px 0 }
+.haraj-dialog .haraj-dialog-close { position:absolute;top:12px;inset-inline-end:12px;padding:6px;color:#a8a8b0;background:#29292e;border-color:#414148 }
+.haraj-review-summary { margin:20px 0;font-size:11px }
+.haraj-review-summary > div { display:flex;justify-content:space-between;gap:18px;padding:10px 0;border-bottom:1px solid #34343c }
+.haraj-review-summary dt { color:#a4a4b0 }
+.haraj-review-summary dd { margin:0;direction:ltr;white-space:nowrap }
+.haraj-check { display:flex;align-items:flex-start;gap:10px;font-size:12px;line-height:1.8;margin:18px 0 }
+.haraj-check input { flex:0 0 auto;margin-top:5px;accent-color:#b59aff;width:16px;height:16px }
+.haraj-dialog .haraj-actions { justify-content:flex-end;margin-top:22px }
+@media(max-width:1100px) { .haraj-metrics { grid-template-columns:repeat(2,minmax(0,1fr)) } .haraj-console__grid { grid-template-columns:minmax(0,1fr) } .haraj-status { align-items:flex-start;flex-direction:column } }
+@media(max-width:600px) { .haraj-console__heading { align-items:flex-start } .haraj-console h2 { font-size:22px } .haraj-card,.haraj-metric { padding:16px } .haraj-fields { grid-template-columns:minmax(0,1fr) } .haraj-status { padding:16px } .haraj-console__heading > button { font-size:0;padding:10px } }
+@media(prefers-reduced-motion:reduce) { .haraj-risk__track i { transition:none } }

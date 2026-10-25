@@ -15,7 +15,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <BrowserRouter>
       <LanguageProvider>
-      <Toaster theme="dark" position="top-right" closeButton duration={4500} richColors />
+      <Toaster theme="dark" position="top-right" duration={4500} richColors />
       <Refine
         routerProvider={routerProvider}
         resources={[

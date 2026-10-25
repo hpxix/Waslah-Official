@@ -12,21 +12,24 @@ import {
   ArrowUpRight,
   Building2,
   ChevronDown,
-  ChevronRight,
   Download,
   FileSpreadsheet,
   FileText,
-  Layers3,
+  Globe2,
   LoaderCircle,
+  Mail,
+  MessageCircle,
   Phone,
+  PhoneCall,
   RefreshCw,
   Search,
   Sparkles,
   Target,
   UsersRound,
+  Video,
   X,
 } from "lucide-react";
-import type { CompanyResearch, Lead } from "../types";
+import type { CompanyResearch, Lead, ListingPreview } from "../types";
 import {
   apiErrorMessage,
   continueB2CCampaign,
@@ -39,7 +42,9 @@ import { exportLeadsCsv, exportLeadsXlsx } from "../lib/leadExport";
 import { notify } from "../lib/notify";
 import { B2BProspectTable } from "./LeadIntelligence";
 import { B2CJourney } from "./B2CJourney";
+import { LeadRunSelector } from './LeadRunSelector';
 import { WaslaBrand } from "./WaslaBrand";
+import { WhatsappDraft } from "./LeadPipelineBoard";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import {
@@ -51,6 +56,7 @@ import {
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { Input } from "./ui/input";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "./ui/hover-card";
 import {
   Card,
   CardContent,
@@ -66,9 +72,61 @@ import {
   TableHeader,
   TableRow,
 } from "./ui/table";
+import {
+  Tooltip as UiTooltip,
+  TooltipContent as UiTooltipContent,
+  TooltipProvider as UiTooltipProvider,
+  TooltipTrigger as UiTooltipTrigger,
+} from "./ui/tooltip";
 import "./core-leads.css";
+import { CompactLeadCRM } from "./CompactLeadCRM";
 
 const isB2C = (lead: Lead) => /b2c/i.test(lead.source);
+
+const listingIntentDisplay: Record<ListingPreview["intent"], { en: [string, string]; ar: [string, string] }> = {
+  sold_or_closed: { en: ["Past product activity", "A related public item appears to be no longer available. Current interest is unconfirmed."], ar: ["نشاط سابق لمنتج", "نشاط عام متعلق بمنتج مشابه يبدو أنه انتهى. الاهتمام الحالي غير مؤكد."] },
+  seeking_work: { en: ["Work-related activity", "Public wording suggests a work search, not a confirmed product purchase."], ar: ["نشاط متعلق بالعمل", "تشير الصياغة العامة إلى بحث عن عمل، وليس إلى شراء منتج مؤكّد."] },
+  seeking_to_rent: { en: ["Rental interest", "Public wording suggests a search for something to rent in this category."], ar: ["اهتمام بالاستئجار", "تشير الصياغة العامة إلى بحث عن شيء للاستئجار ضمن هذه الفئة."] },
+  seeking_to_buy: { en: ["Product search", "Public wording suggests a search for a product in this category. Purchase has not been confirmed."], ar: ["بحث عن منتج", "تشير الصياغة العامة إلى بحث عن منتج ضمن هذه الفئة، لكن الشراء غير مؤكد."] },
+  offering_for_rent: { en: ["Related rental activity", "Public activity involved a related rental offer. This does not confirm buying demand."], ar: ["نشاط تأجير مرتبط", "ظهر نشاط عام متعلق بعرض تأجير مشابه. لا يؤكد ذلك وجود طلب للشراء."] },
+  offering_for_sale: { en: ["Related product activity", "Public activity involved a product in this category. We have not confirmed buying interest."], ar: ["نشاط منتج مرتبط", "ظهر نشاط عام حول منتج ضمن هذه الفئة. لم نتأكد من وجود اهتمام بالشراء."] },
+  offering_service: { en: ["Related service activity", "Public activity involved a service in this category. The person's current need is unconfirmed."], ar: ["نشاط خدمة مرتبط", "ظهر نشاط عام متعلق بخدمة ضمن هذه الفئة. الحاجة الحالية غير مؤكدة."] },
+  product_listed: { en: ["Related product activity", "Public activity involved a product in this category. The person's current need is unconfirmed."], ar: ["نشاط منتج مرتبط", "ظهر نشاط عام حول منتج ضمن هذه الفئة. الحاجة الحالية غير مؤكدة."] },
+  not_stated: { en: ["Related online activity", "A public activity signal matched this category, but its purpose is not clear enough to infer intent."], ar: ["نشاط رقمي مرتبط", "ظهر نشاط عام مرتبط بهذه الفئة، لكن هدفه غير واضح بما يكفي لاستنتاج النية."] },
+};
+
+function LiteListingHover({ lead, ar }: { lead: Lead; ar: boolean }) {
+  const listing = lead.listing;
+  const identity = <span className="core-lead-identity__text">
+    <strong dir="auto">{lead.name || "—"}</strong>
+    <small>{lead.title || (ar ? "مؤسس" : "Founder")}</small>
+  </span>;
+  if (!listing) return identity;
+  const [label, summary] = listingIntentDisplay[listing.intent]?.[ar ? "ar" : "en"] || listingIntentDisplay.not_stated[ar ? "ar" : "en"];
+  const product = listing.product?.trim();
+  const likelyOwner = product && listing.ownership === "likely_owner";
+  const salesContext = likelyOwner
+    ? ar ? "يبدو أنه يملك هذا المنتج" : "Likely owns this product"
+    : product && !["sold_or_closed", "seeking_work"].includes(listing.intent)
+      ? ar ? "نشاط مرتبط بهذا المنتج" : "Activity involving this product"
+      : summary;
+  return <HoverCard openDelay={180} closeDelay={120}>
+    <HoverCardTrigger asChild>
+      <button type="button" className="core-lead-identity__preview-trigger" aria-label={ar ? `عرض ملخص النشاط لـ ${lead.name}` : `View activity summary for ${lead.name}`}>
+        {identity}
+      </button>
+    </HoverCardTrigger>
+    <HoverCardContent className="core-lead-listing-hover" side={ar ? "right" : "left"} align="start" collisionPadding={16} dir={ar ? "rtl" : "ltr"}>
+      <div className="core-lead-listing-hover__eyebrow"><span>{ar ? "معلومات سريعة للمبيعات" : "Sales brief"}</span><span className={`is-${listing.intent}`}>{label}</span></div>
+      <dl className="core-lead-listing-hover__facts">
+        <div><dt>{ar ? "العميل" : "Lead"}</dt><dd dir="auto">{lead.name || "—"}</dd></div>
+        {product && <div><dt>{ar ? "المنتج" : "Product"}</dt><dd>{!ar && listing.productCategoryEn && <strong>{listing.productCategoryEn}</strong>}<span dir="auto">{product}</span></dd></div>}
+        <div><dt>{ar ? "ما نعرفه" : "Sales context"}</dt><dd>{salesContext}</dd></div>
+      </dl>
+      <small className="core-lead-listing-hover__caveat">{ar ? "استنتاج من نشاط عام؛ الملكية والحاجة الشرائية غير مؤكّدتين." : "Public activity only; ownership and buying need are not verified."}</small>
+    </HoverCardContent>
+  </HoverCard>;
+}
 
 function matchesLeadSearch(lead: Lead, query: string) {
   const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -86,9 +144,7 @@ function matchesLeadSearch(lead: Lead, query: string) {
 function LeadKpis({ leads, ar }: { leads: Lead[]; ar: boolean }) {
   const b2c = leads.filter(isB2C).length;
   const phones = leads.filter((lead) => lead.phone).length;
-  const highFit = leads.filter(
-    (lead) => lead.status === "qualified" || lead.fitScore >= 80,
-  ).length;
+  const astraeus = leads.length - b2c;
   const points = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -114,7 +170,7 @@ function LeadKpis({ leads, ar }: { leads: Lead[]; ar: boolean }) {
       ar ? "كل الفرص المحفوظة" : "All saved opportunities",
     ],
     [
-      ar ? "عملاء الأفراد" : "B2C leads",
+      ar ? "عملاء Wasla-Lite" : "Wasla-Lite leads",
       b2c,
       Target,
       ar ? "إشارات شراء فعلية" : "Observable buying signals",
@@ -126,10 +182,10 @@ function LeadKpis({ leads, ar }: { leads: Lead[]; ar: boolean }) {
       ar ? `${phones} رقم متاح` : `${phones} callable contacts`,
     ],
     [
-      ar ? "جاهزون للتواصل" : "High-fit leads",
-      highFit,
-      Sparkles,
-      ar ? "أعلى ملاءمة للبيع" : "Best opportunities to contact",
+      ar ? "عملاء Wasla-Astraeus" : "Wasla-Astraeus leads",
+      astraeus,
+      Building2,
+      ar ? "شركات وصنّاع قرار" : "Companies and decision-makers",
     ],
   ] as const;
   return (
@@ -183,8 +239,8 @@ function LeadKpis({ leads, ar }: { leads: Lead[]; ar: boolean }) {
                     x2="0"
                     y2="1"
                   >
-                    <stop offset="0%" stopColor="#82f5a8" stopOpacity={0.34} />
-                    <stop offset="100%" stopColor="#82f5a8" stopOpacity={0} />
+                    <stop offset="0%" stopColor="var(--chart-1, #ffff51)" stopOpacity={0.22} />
+                    <stop offset="100%" stopColor="var(--chart-1, #ffff51)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid vertical={false} stroke="#ffffff10" />
@@ -212,7 +268,7 @@ function LeadKpis({ leads, ar }: { leads: Lead[]; ar: boolean }) {
                 <Area
                   type="monotone"
                   dataKey="leads"
-                  stroke="#82f5a8"
+                  stroke="var(--chart-1, #ffff51)"
                   strokeWidth={1.6}
                   fill="url(#coreLeadActivity)"
                 />
@@ -289,11 +345,11 @@ function PitchModal({
           <span>
             <WaslaBrand variant="symbol" inverse />
           </span>
-          <i>B2C+</i>
+          <i>Lite</i>
           <strong>WASLA AI</strong>
         </div>
         <span className="b2c-pitch-modal__eyebrow">
-          {ar ? "ذكاء المبيعات للأفراد" : "B2C SALES INTELLIGENCE"}
+          {ar ? "ذكاء مبيعات Wasla-Lite" : "WASLA-LITE SALES INTELLIGENCE"}
         </span>
         <h2>
           {ar
@@ -338,17 +394,30 @@ function PitchModal({
             </div>
             <footer>
               {lead.phone ? (
-                <Button asChild>
+                <div className="b2c-pitch-modal__contact-actions">
                   <a
-                    dir="ltr"
+                    className="b2c-pitch-modal__contact-button is-call"
                     href={`tel:${lead.phone.replace(/[^+\d]/g, "")}`}
+                    aria-label={ar ? `اتصل بـ ${lead.name}` : `Call ${lead.name}`}
+                    title={ar ? "اتصال هاتفي" : "Call on your phone"}
                   >
-                    <Phone size={15} />
-                    {lead.phone}
+                    <PhoneCall size={18} />
                   </a>
-                </Button>
+                  <a
+                    className="b2c-pitch-modal__contact-button is-facetime"
+                    href={`facetime:${lead.phone.replace(/[^+\d]/g, "")}`}
+                    aria-label={ar ? `اتصال FaceTime مع ${lead.name}` : `FaceTime ${lead.name}`}
+                    title="FaceTime"
+                  >
+                    <Video size={19} />
+                  </a>
+                </div>
               ) : null}
-              <Button variant="outline" onClick={onClose}>
+              <Button
+                variant="outline"
+                className="b2c-pitch-modal__done"
+                onClick={onClose}
+              >
                 {ar ? "تم" : "Done"}
               </Button>
             </footer>
@@ -371,6 +440,7 @@ export function CoreLeadsWorkspace({
   onRefresh,
   onChat,
   onResearch,
+  onPersona,
 }: {
   leads: Lead[];
   research: CompanyResearch[];
@@ -383,6 +453,7 @@ export function CoreLeadsWorkspace({
   onRefresh: () => void | Promise<void>;
   onChat: () => void;
   onResearch: (lead: Lead) => void;
+  onPersona: () => void;
 }) {
   const ar = language === "ar";
   const [query, setQuery] = useState(""),
@@ -393,7 +464,8 @@ export function CoreLeadsWorkspace({
   const [runsLoading, setRunsLoading] = useState(true),
     [runsError, setRunsError] = useState(""),
     [continuing, setContinuing] = useState(false),
-    [pitchLead, setPitchLead] = useState<Lead | null>(null);
+    [pitchLead, setPitchLead] = useState<Lead | null>(null),
+    [messageLead, setMessageLead] = useState<Lead | null>(null);
   const autoContinuedCampaign = useRef<string | null>(null);
   const running = isLeadJobRunning(job);
   const partialSearching = Boolean(
@@ -450,7 +522,7 @@ export function CoreLeadsWorkspace({
       job?.status.toLowerCase() !== "partial" ||
       campaign.stats.uniqueLeads >= campaign.targetLeadCount ||
       campaign.stats.sourceExhausted ||
-      (Boolean(campaign.stats.maxAds) && campaign.stats.postsFetched >= Number(campaign.stats.maxAds)) ||
+      (Boolean(campaign.stats.maxAds) && Number(campaign.stats.listingsFetchedTotal ?? campaign.stats.postsFetched) >= Number(campaign.stats.maxAds)) ||
       autoContinuedCampaign.current === campaign.id
     )
       return;
@@ -482,9 +554,13 @@ export function CoreLeadsWorkspace({
     }
   }
 
-  function downloadCsv() {
-    exportLeadsCsv(filtered);
+  async function downloadCsv() {
+    try {
+    await exportLeadsCsv(filtered);
     notify.success(ar ? "تم تجهيز ملف CSV." : "CSV export is ready.", { description: ar ? `تم تصدير ${filtered.length} عميل.` : `${filtered.length} leads were exported.` });
+    } catch (failure) {
+      notify.danger(apiErrorMessage(failure, ar ? "تعذر التحقق من صلاحية التصدير." : "Could not verify export permission."));
+    }
   }
 
   async function downloadXlsx() {
@@ -517,8 +593,8 @@ export function CoreLeadsWorkspace({
     }
   }
   const labels = ar
-    ? ["الاسم", "المدينة", "رقم الهاتف", "سبب التأهل"]
-    : ["Name", "City", "Phone number", "Reasoning"];
+    ? ["الاسم", "المدينة", "التواصل", "سبب التأهل", "العرض"]
+    : ["Name", "City", "Contact", "Reasoning", "Pitch"];
 
   return (
     <section className="core-leads">
@@ -548,8 +624,8 @@ export function CoreLeadsWorkspace({
           <div className="core-leads__filters">
             {[
               ["all", ar ? "الكل" : "All leads"],
-              ["b2b", "B2B"],
-              ["b2c", "B2C"],
+              ["b2b", "Wasla-Astraeus"],
+              ["b2c", "Wasla-Lite"],
             ].map(([value, label]) => (
               <Button
                 key={value}
@@ -585,7 +661,7 @@ export function CoreLeadsWorkspace({
             <DropdownMenuContent align={ar ? "start" : "end"} className="core-export-menu">
               <DropdownMenuLabel>{ar ? `تصدير ${filtered.length} عميل` : `Export ${filtered.length} leads`}</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={downloadCsv}>
+              <DropdownMenuItem onSelect={() => void downloadCsv()}>
                 <FileText size={16} />
                 {ar ? "ملف CSV" : "CSV file"}
               </DropdownMenuItem>
@@ -599,53 +675,9 @@ export function CoreLeadsWorkspace({
             <RefreshCw size={17} />
           </Button>
         </div>
-        <div className="core-lead-runs">
-          <button
-            className={!selectedRunId ? "is-active" : ""}
-            onClick={() => void selectRun(null)}
-          >
-            <span>
-              <Layers3 size={17} />
-              <strong>
-                {filter === "b2c"
-                  ? "All B2C leads"
-                  : filter === "b2b"
-                    ? "All B2B leads"
-                    : ar
-                      ? "كل العملاء"
-                      : "All leads"}
-              </strong>
-            </span>
-            <small>
-              {
-                leads.filter(
-                  (lead) =>
-                    filter === "all" ||
-                    (isB2C(lead) ? "b2c" : "b2b") === filter,
-                ).length
-              }
-            </small>
-          </button>
-          {visibleRuns.map((run) => (
-            <button
-              key={run.id}
-              className={selectedRunId === run.id ? "is-active" : ""}
-              onClick={() => void selectRun(run.id)}
-            >
-              <span>
-                <i className={`is-${run.type}`}>{run.type.toUpperCase()}</i>
-                <strong>{run.title}</strong>
-                <small>
-                  {new Date(run.created_at).toLocaleDateString(
-                    ar ? "ar-SA" : "en-GB",
-                  )}{" "}
-                  · {run.result_count}/{run.target_count}
-                </small>
-              </span>
-              <ChevronRight size={16} />
-            </button>
-          ))}
-        </div>
+        <LeadRunSelector runs={visibleRuns} selectedId={selectedRunId}
+          total={leads.filter(lead => filter === 'all' || (isB2C(lead) ? 'b2c' : 'b2b') === filter).length}
+          ar={ar} onSelect={id => void selectRun(id)} />
         {runsError ? (
           <div className="core-leads__error">
             <span>{runsError}</span>
@@ -668,80 +700,7 @@ export function CoreLeadsWorkspace({
           </div>
         ) : (
           <>
-            {filtered.some((lead) => !isB2C(lead)) && (
-              <B2BProspectTable
-                leads={filtered.filter((lead) => !isB2C(lead))}
-                research={research}
-                language={language}
-                researchingLeadId={researchingLeadId}
-                focusedLeadId={focusedLeadId}
-                onResearch={onResearch}
-              />
-            )}{" "}
-            {filtered.some(isB2C) && (
-              <div className="core-leads__table-wrap">
-                <Table className="core-leads__table core-leads__table--b2c">
-                  <TableHeader>
-                    <TableRow>
-                      {labels.map((label) => (
-                        <TableHead key={label}>{label}</TableHead>
-                      ))}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filtered.filter(isB2C).map((lead) => (
-                      <TableRow
-                        id={lead.id}
-                        key={lead.id}
-                        className={
-                          focusedLeadId === lead.id ? "is-search-focus" : ""
-                        }
-                      >
-                        <TableCell data-label={labels[0]}>
-                          <div className="core-lead-identity">
-                            <span className="core-b2c-mark">
-                              <WaslaBrand variant="symbol" inverse />
-                              <i>B2C+</i>
-                            </span>
-                            <strong dir="auto">{lead.name || "—"}</strong>
-                          </div>
-                        </TableCell>
-                        <TableCell data-label={labels[1]} dir="auto">
-                          {lead.location || "—"}
-                        </TableCell>
-                        <TableCell data-label={labels[2]}>
-                          {lead.phone ? (
-                            <a
-                              className="core-lead-phone"
-                              dir="ltr"
-                              href={`tel:${lead.phone.replace(/[^+\d]/g, "")}`}
-                            >
-                              <Phone size={15} />
-                              <span>{lead.phone}</span>
-                            </a>
-                          ) : (
-                            "—"
-                          )}
-                        </TableCell>
-                        <TableCell data-label={labels[3]}>
-                          <div className="core-lead-reason">
-                            <p dir="auto">{lead.qualificationReason || "—"}</p>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => setPitchLead(lead)}
-                            >
-                              <Sparkles size={14} />
-                              {ar ? "ابنِ عرضاً بيعياً" : "Build sales pitch"}
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
+            <CompactLeadCRM leads={filtered} ar={ar} />
           </>
         )}
         <footer className="core-leads__footer">
@@ -756,6 +715,7 @@ export function CoreLeadsWorkspace({
         ar={ar}
         onClose={() => setPitchLead(null)}
       />
+      {messageLead ? <WhatsappDraft lead={messageLead} ar={ar} onClose={() => setMessageLead(null)} onPersona={onPersona} /> : null}
     </section>
   );
 }

@@ -3,8 +3,8 @@ import type { CompanyResearch, EmailTemplate, Lead, ProductProfile, Proposal } f
 export const productProfile: ProductProfile = {
   id: "product-1",
   name: "Waslah Growth Engine",
-  description: "AI-assisted lead discovery, research, proposals, and email outreach for B2B teams.",
-  audience: "B2B founders, agencies, and sales teams selling into service businesses and SaaS companies.",
+  description: "AI-assisted lead discovery, research, proposals, and email outreach for Wasla-Astraeus teams.",
+  audience: "Wasla-Astraeus founders, agencies, and sales teams selling into service businesses and SaaS companies.",
   differentiators: [
     "Clarifies lead intent before spending sourcing credits",
     "Combines multi-source research with CRM scoring",

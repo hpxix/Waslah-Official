@@ -9,10 +9,10 @@ import {
 const planning = await createB2CPlan({}, "I sell iPhone 18 devices in Riyadh");
 assert.equal(planning.intent.buyerType, "B2C");
 assert.deepEqual(planning.intent.market.cities, ["Riyadh"]);
-assert.equal(planning.acquisitionPlan.strategies.length, 1);
+assert.equal(planning.acquisitionPlan.strategies.length, 4);
 assert.equal(planning.acquisitionPlan.strategies[0].searchTerm, "مطلوب ايفون 18");
-assert.equal(planning.acquisitionPlan.searchStrategyVersion, 6);
-assert.equal(planning.acquisitionPlan.strategistVersion, "wasla-saudi-lead-search-strategist-v1");
+assert.equal(planning.acquisitionPlan.searchStrategyVersion, 7);
+assert.equal(planning.acquisitionPlan.strategistVersion, "saudi-keyword-v1");
 assert.equal(planning.acquisitionPlan.strategies[0].sourceMode, "search");
 assert.equal("tagName" in planning.acquisitionPlan.strategies[0], false);
 assert.equal("taxonomyMatches" in planning, false);
@@ -41,7 +41,7 @@ assert.equal(scoreB2CCandidate(candidate("أبي سواق خاص", "أبحث ع�
 const validated = await validateB2CPlan({}, "I sell iPhone 18 devices in Riyadh", {
   acquisitionPlan: { strategies: [{ tagName: "هواتف" }] },
 });
-assert.equal(validated.acquisitionPlan.strategies.length, 1);
+assert.equal(validated.acquisitionPlan.strategies.length, 4);
 assert.equal(validated.acquisitionPlan.strategies[0].searchTerm, "مطلوب ايفون 18");
 assert.equal("tagName" in validated.acquisitionPlan.strategies[0], false);
 

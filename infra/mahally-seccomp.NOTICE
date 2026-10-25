@@ -1,0 +1,6 @@
+Source: Microsoft Playwright v1.64.0, utils/docker/seccomp_profile.json
+https://github.com/microsoft/playwright/blob/v1.64.0/utils/docker/seccomp_profile.json
+Licensed under Apache License 2.0; see mahally-seccomp.LICENSE.
+
+Wasla modification: allow chroot with the user-namespace syscalls, supporting
+Chromium's namespace sandbox while dropping all container host capabilities.

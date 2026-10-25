@@ -52,7 +52,7 @@ export function B2CJourney({ job, language }: { job: LeadJob | null; language: "
     {open ? createPortal(<div className="b2c-journey-modal" role="dialog" aria-modal="true" aria-labelledby="b2c-journey-title" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}>
       <div className="b2c-journey-modal__panel">
         <Button type="button" className="b2c-journey-modal__close" onClick={() => setOpen(false)} aria-label={ar ? "إغلاق" : "Close"}><X size={18}/></Button>
-        <span className="b2c-journey-modal__eyebrow">{ar ? "اكتمل بحث B2C" : "B2C SEARCH COMPLETE"}</span>
+        <span className="b2c-journey-modal__eyebrow">{ar ? "اكتمل بحث Wasla-Lite" : "WASLA-LITE SEARCH COMPLETE"}</span>
         <h2 id="b2c-journey-title">{ar ? "هكذا وجدت وصلة عملاءك" : "Here’s how Wasla found your audience"}</h2>
         <p>{ar ? `${campaign.stats.uniqueLeads} عميل جاهز الآن في لوحة العملاء.` : `${campaign.stats.uniqueLeads} matched leads are now ready in your Leads workspace.`}</p>
         {cards}

@@ -1,0 +1,8 @@
+FROM mcr.microsoft.com/playwright:v1.64.0-noble
+WORKDIR /app/services/mahally
+COPY services/mahally/package.json ./package.json
+RUN npm install --omit=dev --ignore-scripts --no-audit --no-fund
+COPY --chown=pwuser:pwuser services/mahally/ ./
+COPY --chown=pwuser:pwuser directus/extensions/directus-extension-waslah-lead-agent/dist/ /app/directus/extensions/directus-extension-waslah-lead-agent/dist/
+USER pwuser
+CMD ["node", "server.mjs"]

@@ -21,7 +21,7 @@ ENV VITE_DIRECTUS_EMAIL_FLOW_PATH=$VITE_DIRECTUS_EMAIL_FLOW_PATH
 ENV VITE_DIRECTUS_LEAD_AGENT_PATH=$VITE_DIRECTUS_LEAD_AGENT_PATH
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN npm run build
+RUN npm run build && chmod -R a+rX /app/dist
 
 FROM nginx:1.27-alpine AS runtime
 COPY infra/nginx/default.conf /etc/nginx/conf.d/default.conf

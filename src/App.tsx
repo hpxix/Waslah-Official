@@ -1,4 +1,19 @@
 import { DashboardOverview } from "./components/DashboardOverview";
+import { RevealedChatReply } from './components/RevealedChatReply';
+import { isSmallTalkTurn } from './lib/chatBehavior';
+import { websiteInputUrl } from './lib/websiteRead';
+import { startWebsiteRead } from './lib/directus';
+import type { WebsiteRead } from './lib/directus';
+import { WebsiteReadProgress } from './components/WebsiteReadProgress';
+import { parseReadyLeadQuantity } from './lib/leadQuantity';
+import { ChatTenderResults } from './components/ChatTenderResults';
+import {
+  ChatModelSelector,
+  type WaslaModelChoice,
+} from "./components/ChatModelSelector";
+import { LiquidMetalEdge } from "./components/LiquidMetalEdge";
+import { useLiquidMetalShader } from "./lib/useLiquidMetalShader";
+import { SignalSetup, SignalWorkspace } from "./components/SignalWorkspace";
 import { AdminControlCenter } from "./components/AdminControlCenter";
 import { AdminLeadExplorer } from "./components/AdminLeadExplorer";
 import {
@@ -16,6 +31,7 @@ import {
   useSidebar,
 } from "./components/ui/sidebar";
 import { Button as UiButton } from "./components/ui/button";
+import { Badge as UiBadge } from "./components/ui/badge";
 import {
   Tabs as UiTabs,
   TabsContent,
@@ -34,6 +50,7 @@ import {
 import { Avatar } from "@heroui/react";
 import {
   Activity,
+  AtSign,
   ArrowUpLeft,
   ArrowUpRight,
   ArrowLeft,
@@ -47,33 +64,45 @@ import {
   Command,
   CreditCard,
   FileText,
+  Facebook,
+  Gamepad2,
   Gift,
+  Ghost,
+  Instagram,
   LayoutDashboard,
   LogIn,
   LogOut,
   Lock,
+  Linkedin,
   MessageSquare,
+  MessageCircle,
+  Music2,
   PanelLeftClose,
+  PhoneCall,
+  Pin,
   Plus,
   RefreshCw,
   Search,
+  Send,
   Settings,
   Share2,
   ShieldCheck,
   Sparkles,
+  SquareKanban,
   Store,
   Target,
+  Twitch,
   UserPlus,
   WalletCards,
   History,
   X,
+  Youtube,
 } from "lucide-react";
 import { Badge, Button, Card, Chip, ProgressBar } from "@heroui/react";
 import { ThinkingOrb } from "thinking-orbs";
 import type { OrbState } from "thinking-orbs";
 import { BorderBeam } from "border-beam";
-import { liquidMetalFragmentShader, ShaderMount } from "@paper-design/shaders";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -95,7 +124,9 @@ import {
   apiErrorMessage,
   converseWithWasla,
   fetchCapabilities,
+  fetchLeadJob,
   startLeadGeneration,
+  stopB2CCampaign,
   getLeadResearch,
   fetchWorkspaceResearch,
   getAccount,
@@ -111,6 +142,7 @@ import { WaslaBrand } from "./components/WaslaBrand";
 import { AuthDialog } from "./components/AuthDialog";
 import { ProductTour } from "./components/ProductTour";
 import { CoreLeadsWorkspace } from "./components/CoreLeadsWorkspace";
+import { LeadPipelineBoard } from "./components/LeadPipelineBoard";
 import { useLeadWorkspace } from "./lib/useLeadWorkspace";
 import { LegalPage } from "./components/LegalPage";
 import { SocialsWorkspace } from "./components/SocialsWorkspace";
@@ -129,40 +161,43 @@ const navItems = [
   },
   { to: "/console/agent", labelKey: "console.agent", icon: MessageSquare },
   { to: "/console/leads", labelKey: "console.leads", icon: Building2 },
+  { to: "/console/crm", labelKey: "console.crm", icon: SquareKanban },
   { to: "/console/persona", labelKey: "console.persona", icon: BrainCircuit },
   { to: "/console/researched", labelKey: "console.researched", icon: Sparkles },
 ];
+const LOCKED_CONSOLE_SECTIONS = new Set(["researched", "socials", "listings", "insights", "proposals", "payments"]);
+function consoleSectionLocked(key: string, isAdmin = false) {
+  return LOCKED_CONSOLE_SECTIONS.has(key) && !(isAdmin && key === 'researched');
+}
 
 const storedAuthKey = "waslah-auth-user";
 
 type ChatMessage = {
   role: "assistant" | "user";
   text: string;
+  tenderOffer?: import('./lib/directus').TenderOffer;
+  responseMs?: number;
+  repliedAt?: number;
+  websiteRead?: WebsiteRead;
 };
 
 function scanFriendlyAssistantText(text: string) {
-  const value = String(text || "").trim();
-  if (
-    !value ||
-    value.length < 220 ||
-    /\n|^\s*(?:[-*•#]|\d+[.)])\s/m.test(value)
-  )
-    return value;
-  const sentences =
-    value
-      .match(/[^.!?؟]+(?:[.!?؟]+|$)/g)
-      ?.map((item) => item.trim())
-      .filter(Boolean) || [];
-  if (sentences.length < 3) return value;
-  const lastIsQuestion = /[?؟]$/.test(sentences.at(-1) || "");
-  const question = lastIsQuestion ? sentences.pop() : null;
-  const intro = sentences.shift();
-  const bullets = sentences.map((sentence) => `- ${sentence}`).join("\n");
-  return [intro, bullets, question].filter(Boolean).join("\n\n");
+  const value = String(text || "")
+    .replace(/\r\n?/g, "\n")
+    // Repair malformed abbreviation bullets from older saved responses.
+    .replace(/\(\s*e\.\s*\n\s*[-*•]\s*g\.\s*\n\s*[-*•]\s*,?\s*/gi, "(e.g., ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  if (!value || value.includes("\n") || value.length < 170) return value;
+
+  // Long plain-text answers get paragraph rhythm without inventing a list or
+  // splitting abbreviations such as "e.g." into separate Markdown bullets.
+  return value.replace(/([.!?؟])\s+(?=[A-Z\u0600-\u06ff])/g, "$1\n\n");
 }
 
 type DealIntent = "buy" | "sell";
-type LeadTypeChoice = "b2c" | "b2b" | "unsure";
+type LeadTypeChoice = "b2c" | "b2b" | "ultra";
 type ChatReasoningMode = "fast" | "high";
 type AvatarPreference = { color: string; showInitial: boolean };
 
@@ -194,6 +229,7 @@ type ChatThread = {
   intake: IntakeState;
   intent?: DealIntent | null;
   leadType?: "b2c" | "b2b" | null;
+  modelChoice?: WaslaModelChoice | null;
   reasoningMode?: ChatReasoningMode | null;
   showLeadOptions?: boolean;
 };
@@ -214,7 +250,7 @@ function restoreChat(userId?: string): ChatThread | null {
     ) as ChatThread[];
     const activeId = localStorage.getItem(`wasla:active-chat:${userId}`);
     const active = threads.find((thread) => thread.id === activeId);
-    if (active) return active.messages?.length || active.intent ? active : null;
+    if (active) return active;
     return threads.find((thread) => thread.messages?.length) || null;
   } catch {
     return null;
@@ -291,7 +327,7 @@ function openingMissionQuestion(
 function App() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { isTransitioning: languageIsTransitioning } = useLanguage();
+  const { language, isTransitioning: languageIsTransitioning } = useLanguage();
   const [leads, setLeads] = useState<Lead[]>(hasDirectus ? [] : demoLeads);
   const [research, setResearch] = useState<CompanyResearch[]>(
     hasDirectus ? [] : demoResearch,
@@ -303,10 +339,16 @@ function App() {
       location.pathname === "/auth/social",
   );
   const [authMode, setAuthMode] = useState<"signup" | "login">("signup");
+  const [requestedPlan, setRequestedPlan] = useState<"launch" | "scale" | "autopilot" | null>(() => {
+    const saved = window.sessionStorage.getItem("wasla:requested-plan");
+    return saved === "launch" || saved === "scale" || saved === "autopilot" ? saved : null;
+  });
+  const [salesStatusBusy, setSalesStatusBusy] = useState(false);
   const [routeLoading, setRouteLoading] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
   const previousRoute = useRef<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const [modelLaunchOpen, setModelLaunchOpen] = useState(false);
   const [authUser, setAuthUser] = useState<AuthUser | null>(() => {
     const stored = localStorage.getItem(storedAuthKey);
     return stored ? (JSON.parse(stored) as AuthUser) : null;
@@ -373,19 +415,51 @@ function App() {
       navigate("/");
   }
 
-  function openAuth(mode: "signup" | "login" = "signup") {
+  function openAuth(mode: "signup" | "login" = "signup", plan: "launch" | "scale" | "autopilot" | null = null) {
     setAuthMode(mode);
+    setRequestedPlan(plan);
+    if (plan) window.sessionStorage.setItem("wasla:requested-plan", plan);
+    else window.sessionStorage.removeItem("wasla:requested-plan");
     setAuthOpen(true);
   }
 
-  function showCelebration(message: { title: string; body: string }) {
+  function showCelebration(
+    message: { title: string; body: string },
+    eventKey: string,
+    accountId: string,
+  ) {
+    const noticeKey = `wasla:toast-seen:${accountId}:${eventKey}`;
+    if (window.localStorage.getItem(noticeKey)) return;
+    window.localStorage.setItem(noticeKey, "shown");
     notify.success(message.title, { description: message.body, timeout: 6500 });
   }
 
   function enterWorkspace(user: AuthUser) {
     setAuthUser(user);
     setAuthReady(true);
+    setModelLaunchOpen(false);
+    if (user.isAdmin || user.subscriptionStatus === "active") {
+      void fetchCapabilities().then((capabilities) => {
+        setModelLaunchOpen(Boolean(capabilities.features.lead_agent_b2b));
+      }).catch(() => setModelLaunchOpen(false));
+    }
     navigate("/console");
+  }
+
+  async function refreshSalesStatus() {
+    setSalesStatusBusy(true);
+    try {
+      const account = accountToAuthUser(await getAccount());
+      setAuthUser(account);
+      if (account.subscriptionStatus === "active") {
+        const capabilities = await fetchCapabilities();
+        setModelLaunchOpen(Boolean(capabilities.features.lead_agent_b2b));
+      }
+    } catch (error) {
+      notify.danger(apiErrorMessage(error));
+    } finally {
+      setSalesStatusBusy(false);
+    }
   }
 
   async function handleLogout() {
@@ -474,7 +548,9 @@ function App() {
             element={
               authReady ? (
                 authUser ? (
-                  <ConsoleShell
+                  !authUser.isAdmin && authUser.subscriptionStatus !== "active" ? (
+                    <SalesQueueScreen user={authUser} busy={salesStatusBusy} onRefresh={refreshSalesStatus} onLogout={handleLogout} />
+                  ) : <ConsoleShell
                     key={authUser?.id || "guest"}
                     user={authUser}
                     initialAsk={pendingLeadAsk}
@@ -497,6 +573,7 @@ function App() {
       </div>
       <AuthDialog
         initialMode={authMode}
+        selectedPlan={requestedPlan}
         open={authOpen}
         user={authUser}
         onClose={closeAuth}
@@ -507,9 +584,58 @@ function App() {
         onCelebration={showCelebration}
         onReady={enterWorkspace}
       />
+      {modelLaunchOpen && authUser ? (
+        <ModelLaunchDialog
+          language={language}
+          onClose={() => setModelLaunchOpen(false)}
+          onChoose={(model) => {
+            window.localStorage.setItem(
+              `wasla:preferred-model:${authUser.id}`,
+              model,
+            );
+            window.dispatchEvent(
+              new CustomEvent("wasla:model-preference", { detail: model }),
+            );
+            setModelLaunchOpen(false);
+            navigate("/console/agent");
+          }}
+        />
+      ) : null}
       <div id="wasla-modal-root" />
     </>
   );
+}
+
+function SalesQueueScreen({
+  user, busy, onRefresh, onLogout,
+}: {
+  user: AuthUser;
+  busy: boolean;
+  onRefresh: () => void;
+  onLogout: () => void;
+}) {
+  const { language, direction } = useLanguage();
+  const ar = language === "ar";
+  const plan = user.subscriptionPlan ? user.subscriptionPlan.charAt(0).toUpperCase() + user.subscriptionPlan.slice(1) : null;
+  return <main className="wasla-sales-queue" dir={direction}>
+    <div className="wasla-sales-queue__preview" aria-hidden="true">
+      <span /><span /><span /><i /><i /><i />
+    </div>
+    <div className="wasla-sales-queue__scrim" />
+    <section className="wasla-sales-queue__card" aria-labelledby="sales-queue-title">
+      <span className="wasla-sales-queue__lock"><Lock size={30} strokeWidth={1.5} /></span>
+      <span className="wasla-sales-queue__eyebrow">WASLA PRIVATE ACCESS</span>
+      <h1 id="sales-queue-title">{ar ? "طلبك في قائمة فريق مبيعات وصلة" : "Queued with Wasla Sales"}</h1>
+      <p>{ar
+        ? "استلمنا بياناتك. سيتواصل فريقنا لترتيب الاشتراك. لن تُفتح مساحة العملاء أو يُضاف الرصيد إلا بعد تأكيد وصول الدفعة كاملة."
+        : "We have your details. Our team will arrange your subscription. Lead access and plan credit unlock only after we confirm full payment."}</p>
+      {plan && <div className="wasla-sales-queue__plan"><span>{ar ? "الباقة المطلوبة" : "Requested plan"}</span><strong>{plan}</strong></div>}
+      <div className="wasla-sales-queue__actions">
+        <button type="button" onClick={onRefresh} disabled={busy}><RefreshCw size={16} className={busy ? "is-spinning" : ""} />{ar ? "تحديث الحالة" : "Check status"}</button>
+        <button type="button" onClick={onLogout}><LogOut size={16} />{ar ? "تسجيل الخروج" : "Sign out"}</button>
+      </div>
+    </section>
+  </main>;
 }
 
 function SidebarMetalBridge({
@@ -564,10 +690,10 @@ function ConsoleShell({
       ? "overview"
       : location.pathname.includes("admin")
         ? "admin"
-        : location.pathname.includes("persona")
+        : location.pathname.includes("crm") ? "crm" : location.pathname.includes("persona")
           ? "persona"
           : location.pathname.includes("researched")
-            ? "researched"
+            ? "overview"
             : location.pathname.includes("leads")
               ? "leads"
               : "agent";
@@ -602,6 +728,8 @@ function ConsoleShell({
     },
   );
   const [busy, setBusy] = useState(false);
+  const replyRequestEpoch = useRef(0);
+  useEffect(() => () => { replyRequestEpoch.current += 1; }, []);
   const [activityMode, setActivityMode] = useState<ChatActivityMode>("idle");
   const [dealIntent, setDealIntent] = useState<DealIntent | null>(
     restoredChat ? savedChatIntent(restoredChat) : null,
@@ -614,36 +742,34 @@ function ConsoleShell({
   );
   const settledLeadShortfall = Boolean(
     leadWorkspace.job &&
-      Number(leadWorkspace.job.result_count) > 0 &&
-      Number(leadWorkspace.job.result_count) <
-        Number(leadWorkspace.job.target_count) &&
-      (["failed", "error", "cancelled"].includes(
-        String(leadWorkspace.job.status).toLowerCase(),
-      ) ||
-        Boolean(leadWorkspace.job.b2cCampaign?.stats.sourceExhausted)),
+    Number(leadWorkspace.job.result_count) > 0 &&
+    Number(leadWorkspace.job.result_count) <
+      Number(leadWorkspace.job.target_count) &&
+    (["failed", "error", "cancelled", "partial"].includes(
+      String(leadWorkspace.job.status).toLowerCase(),
+    ) ||
+      Boolean(leadWorkspace.job.b2cCampaign?.stats.sourceExhausted)),
   );
   const lastLeadErrorToast = useRef("");
+  const [activeLeadSessionJobId, setActiveLeadSessionJobId] = useState<
+    string | null
+  >(null);
   useEffect(() => {
     const toastIdentity = `${leadWorkspace.job?.id || "workspace"}:${leadWorkspace.error}`;
-    if (
-      !leadWorkspace.error ||
-      toastIdentity === lastLeadErrorToast.current
-    )
+    if (!leadWorkspace.error || toastIdentity === lastLeadErrorToast.current)
       return;
     lastLeadErrorToast.current = toastIdentity;
-    setConsoleMessages((messages) => [...messages, {
-      role: "assistant",
-      text: language === "ar"
-        ? `توقف البحث: ${leadWorkspace.error}\n\nيمكنك تعديل الطلب أو إعادة المحاولة. النتائج المحفوظة ما زالت متاحة.`
-        : `The search stopped: ${leadWorkspace.error}\n\nYou can adjust your brief or retry. Saved results remain available.`,
-    }]);
+    // Connection/job notices stay in job status/toasts, never in the transcript.
+    if (!activeLeadSessionJobId || leadWorkspace.job?.id !== activeLeadSessionJobId) return;
     if (settledLeadShortfall && leadWorkspace.job) {
       const delivered = Number(leadWorkspace.job.result_count);
-      const noticeKey = `wasla:lead-shortfall-toast:${leadWorkspace.job.id}`;
+      const noticeKey = `wasla:lead-shortfall-toast:${user?.id || "workspace"}:${leadWorkspace.job.id}`;
       if (window.localStorage.getItem(noticeKey)) return;
       window.localStorage.setItem(noticeKey, "shown");
       notify.warning(
-        language === "ar" ? "توقف البحث قبل اكتمال العدد" : "Search stopped before reaching your target",
+        language === "ar"
+          ? "توقف البحث قبل اكتمال العدد"
+          : "Search stopped before reaching your target",
         {
           description:
             language === "ar"
@@ -654,34 +780,47 @@ function ConsoleShell({
       );
       return;
     }
+    const errorNoticeKey = `wasla:lead-error-toast:${user?.id || "workspace"}:${leadWorkspace.job?.id || "no-job"}:${leadWorkspace.error}`;
+    if (window.localStorage.getItem(errorNoticeKey)) return;
+    window.localStorage.setItem(errorNoticeKey, "shown");
     notify.danger(
       language === "ar"
         ? `تعذر إكمال البحث: ${leadWorkspace.error}`
         : `Lead search could not complete: ${leadWorkspace.error}`,
     );
-  }, [leadWorkspace.error, leadWorkspace.job, settledLeadShortfall, language]);
+  }, [
+    leadWorkspace.error,
+    leadWorkspace.job,
+    settledLeadShortfall,
+    language,
+    user?.id,
+    activeLeadSessionJobId,
+  ]);
   const generationLock = useRef(false);
-  const [activeLeadSessionJobId, setActiveLeadSessionJobId] = useState<string | null>(null);
   const [startingLeadSearch, setStartingLeadSearch] = useState(false);
   const [researchingLeadId, setResearchingLeadId] = useState<string | null>(
     null,
   );
   useEffect(() => {
+    if ([...LOCKED_CONSOLE_SECTIONS].some((section) => consoleSectionLocked(section, user?.isAdmin) && location.pathname.endsWith(`/console/${section}`))) {
+      navigate("/console/overview", { replace: true });
+      return;
+    }
     setActiveTab(
       location.pathname.endsWith("/console") ||
         location.pathname.includes("overview")
         ? "overview"
         : location.pathname.includes("admin")
           ? "admin"
-          : location.pathname.includes("persona")
+          : location.pathname.includes("crm") ? "crm" : location.pathname.includes("persona")
             ? "persona"
             : location.pathname.includes("researched")
-              ? "researched"
+              ? user?.isAdmin ? 'researched' : 'overview'
               : location.pathname.includes("leads")
                 ? "leads"
                 : "agent",
     );
-  }, [location.pathname]);
+  }, [location.pathname, navigate, user?.isAdmin]);
   useEffect(() => {
     setLeads([]);
     setResearch([]);
@@ -728,16 +867,27 @@ function ConsoleShell({
   const [reasoningModePickerOpen, setReasoningModePickerOpen] = useState(
     !restoredChat && initialTab === "agent",
   );
-  const [leadTypePickerOpen, setLeadTypePickerOpen] = useState(
-    false,
-  );
+  const [leadTypePickerOpen, setLeadTypePickerOpen] = useState(false);
   const [dealDirectionPickerOpen, setDealDirectionPickerOpen] = useState(false);
+  const [leadTypeChosen, setLeadTypeChosen] = useState(
+    Boolean(
+      restoredChat?.leadType ||
+      restoredChat?.intake?.channel ||
+      restoredChat?.intent,
+    ),
+  );
   const [selectedLeadType, setSelectedLeadType] = useState<
     "b2c" | "b2b" | null
   >(restoredChat?.leadType || restoredChat?.intake?.channel || null);
-  const [availableLeadTypes, setAvailableLeadTypes] = useState<
-    Array<"b2b" | "b2c">
-  >(["b2b", "b2c"]);
+  const [selectedWaslaModel, setSelectedWaslaModel] =
+    useState<WaslaModelChoice | null>(
+      restoredChat?.modelChoice ??
+        restoredChat?.leadType ??
+        restoredChat?.intake?.channel ??
+        null,
+    );
+  const [customerAvailableModels, setAvailableModels] = useState<Record<WaslaModelChoice, boolean>>({ b2c: true, b2b: false, ultra: false });
+  const availableModels = user?.isAdmin ? { b2c: true, b2b: true, ultra: true } : customerAvailableModels;
   const [creditAlert, setCreditAlert] = useState<{
     targetLeadCount: number;
     requiredCredits: number;
@@ -754,7 +904,13 @@ function ConsoleShell({
     const sync = async () => {
       try {
         const capabilities = await fetchCapabilities();
-        if (!cancelled) setAvailableLeadTypes(capabilities.lead_types);
+        if (!cancelled) {
+          setAvailableModels({
+            b2c: Boolean(capabilities.features.lead_agent_b2c),
+            b2b: Boolean(capabilities.features.lead_agent_b2b),
+            ultra: Boolean(capabilities.features.lead_agent_ultra),
+          });
+        }
       } catch {
         /* The server still enforces the latest policy if this refresh is interrupted. */
       }
@@ -769,22 +925,21 @@ function ConsoleShell({
     };
   }, [user?.id]);
   useEffect(() => {
-    if (
-      availableLeadTypes.length !== 1 ||
-      !leadTypePickerOpen ||
-      consoleMessages.length ||
-      dealIntent
-    )
-      return;
-    setSelectedLeadType(availableLeadTypes[0]);
-    setLeadTypePickerOpen(false);
-    setDealDirectionPickerOpen(true);
-  }, [
-    availableLeadTypes,
-    leadTypePickerOpen,
-    consoleMessages.length,
-    dealIntent,
-  ]);
+    const applyModelPreference = (event: Event) => {
+      const model = (event as CustomEvent<"b2c" | "b2b">).detail;
+      if (model !== "b2c" && model !== "b2b") return;
+      setSelectedLeadType(model);
+      setSelectedWaslaModel(model);
+      setLeadTypeChosen(true);
+      setIntake((current) => ({ ...current, channel: model }));
+    };
+    window.addEventListener("wasla:model-preference", applyModelPreference);
+    return () =>
+      window.removeEventListener(
+        "wasla:model-preference",
+        applyModelPreference,
+      );
+  }, []);
   const [avatarPreference, setAvatarPreference] = useState<AvatarPreference>(
     () => {
       if (!user) return { color: "ocean", showInitial: true };
@@ -831,6 +986,7 @@ function ConsoleShell({
     growth: t("console.growth"),
     agent: language === "ar" ? "المحادثة" : "Chat",
     leads: language === "ar" ? "العملاء" : "Leads",
+    crm: language === "ar" ? "لوحة العملاء · CRM" : "Kanban · CRM",
     persona: language === "ar" ? "شخصية النشاط" : "Business Persona",
     researched: language === "ar" ? "العملاء المبحوثون" : "Researched Leads",
     listings: language === "ar" ? "دليل الشركات" : "Company listings",
@@ -854,7 +1010,7 @@ function ConsoleShell({
             target: "agent",
             eyebrow: "1 من 3",
             title: "ابدأ بمحادثة",
-            body: "اختر B2B أو B2C، ثم الشراء أو البيع. اشرح طلبك لوصلة لنحدد الجمهور والموقع والمعايير معاً.",
+            body: "اختر Wasla-Astraeus أو Wasla-Lite، ثم الشراء أو البيع. اشرح طلبك لوصلة لنحدد الجمهور والموقع والمعايير معاً.",
           },
           {
             target: "wallet",
@@ -866,7 +1022,7 @@ function ConsoleShell({
             target: "leads",
             eyebrow: "3 من 3",
             title: "نتائجك في قسم العملاء",
-            body: "ستظهر النتائج تلقائياً في جدول بسيط. يمكنك البحث فيها وفتح البحث التفصيلي لعملاء B2B فقط.",
+            body: "ستظهر النتائج تلقائياً في جدول بسيط. يمكنك البحث فيها وفتح البحث التفصيلي لعملاء Wasla-Astraeus فقط.",
           },
         ]
       : [
@@ -874,7 +1030,7 @@ function ConsoleShell({
             target: "agent",
             eyebrow: "1 of 3",
             title: "Start with a conversation",
-            body: "Choose B2B or B2C, then Buy or Sell. Tell Wasla your goal and refine your audience, location, and criteria together.",
+            body: "Choose Wasla-Astraeus or Wasla-Lite, then Buy or Sell. Tell Wasla your goal and refine your audience, location, and criteria together.",
           },
           {
             target: "wallet",
@@ -886,17 +1042,18 @@ function ConsoleShell({
             target: "leads",
             eyebrow: "3 of 3",
             title: "Your results live in Leads",
-            body: "Results appear automatically in a simple table. Search your inventory and open detailed company research for B2B leads.",
+            body: "Results appear automatically in a simple table. Search your inventory and open detailed company research for Wasla-Astraeus leads.",
           },
         ];
 
   function selectTab(key: string) {
+    if (consoleSectionLocked(key, user?.isAdmin)) return;
     const tab =
       key === "overview"
         ? "overview"
         : key === "admin" && user?.isAdmin
           ? "admin"
-          : key === "persona"
+          : key === "crm" ? "crm" : key === "persona"
             ? "persona"
             : key === "researched"
               ? "researched"
@@ -913,11 +1070,11 @@ function ConsoleShell({
       if (!chatReasoningMode) {
         setReasoningModePickerOpen(true);
         setLeadTypePickerOpen(false);
-      } else if (availableLeadTypes.length === 1) {
-        setSelectedLeadType(availableLeadTypes[0]);
-        setLeadTypePickerOpen(false);
+      } else if (!leadTypeChosen) {
+        setLeadTypePickerOpen(true);
+      } else {
         setDealDirectionPickerOpen(true);
-      } else setLeadTypePickerOpen(availableLeadTypes.length > 1);
+      }
     }
     setActiveTab(tab);
     setSidebarCollapsed(true);
@@ -926,7 +1083,11 @@ function ConsoleShell({
 
   function startNewChat() {
     if (busy) return;
-    setActiveChatId(newChatId());
+    const nextChatId = newChatId();
+    if (user) {
+      window.localStorage.setItem(`wasla:active-chat:${user.id}`, nextChatId);
+    }
+    setActiveChatId(nextChatId);
     setActiveLeadSessionJobId(null);
     setChatInput("");
     setConsoleMessages([]);
@@ -935,10 +1096,10 @@ function ConsoleShell({
     setReasoningModePickerOpen(true);
     setLeadTypePickerOpen(false);
     setDealDirectionPickerOpen(false);
+    setLeadTypeChosen(false);
     setLeadCountPickerOpen(false);
-    setSelectedLeadType(
-      availableLeadTypes.length === 1 ? availableLeadTypes[0] : null,
-    );
+    setSelectedLeadType(null);
+    setSelectedWaslaModel(null);
     setIntake({
       confidence: 0,
       summary:
@@ -959,11 +1120,15 @@ function ConsoleShell({
     setActivityMode("idle");
     setResearchPhase(0);
     setChatMenuOpen(false);
-    selectTab("agent");
+    // Navigate directly after the reset. Calling selectTab here would inspect the
+    // previous render's intent/messages while React is still batching the reset.
+    setActiveTab("agent");
+    setSidebarCollapsed(true);
+    navigate("/console/agent");
     window.setTimeout(
       () =>
         document
-          .querySelector<HTMLInputElement>(".ops-chat-composer input")
+          .querySelector<HTMLTextAreaElement>(".ops-chat-composer textarea")
           ?.focus(),
       100,
     );
@@ -979,6 +1144,10 @@ function ConsoleShell({
     setChatReasoningMode(thread.reasoningMode ?? "high");
     setReasoningModePickerOpen(false);
     setSelectedLeadType(thread.leadType ?? thread.intake.channel ?? null);
+    setSelectedWaslaModel(
+      thread.modelChoice ?? thread.leadType ?? thread.intake.channel ?? null,
+    );
+    setLeadTypeChosen(true);
     setLeadTypePickerOpen(false);
     setDealDirectionPickerOpen(false);
     setLeadCountPickerOpen(
@@ -1027,6 +1196,7 @@ function ConsoleShell({
       intake,
       intent: dealIntent,
       leadType: selectedLeadType,
+      modelChoice: selectedWaslaModel,
       reasoningMode: chatReasoningMode,
       showLeadOptions: leadCountPickerOpen,
     };
@@ -1050,6 +1220,7 @@ function ConsoleShell({
     chatReasoningMode,
     intake,
     selectedLeadType,
+    selectedWaslaModel,
     leadCountPickerOpen,
     user,
   ]);
@@ -1081,6 +1252,10 @@ function ConsoleShell({
 
   async function sendConsoleMessage(text = chatInput) {
     if (!text.trim() || busy) return;
+    if (selectedWaslaModel && !availableModels[selectedWaslaModel]) {
+      notify.info(language === "ar" ? "هذا النموذج يحتاج موافقة الإدارة قبل استخدامه." : "This model needs admin approval before you can use it.");
+      return;
+    }
     if (!chatReasoningMode) {
       setReasoningModePickerOpen(true);
       notify.info(
@@ -1090,7 +1265,17 @@ function ConsoleShell({
       );
       return;
     }
+    if (!leadTypeChosen) {
+      setLeadTypePickerOpen(true);
+      notify.info(
+        language === "ar"
+          ? "اختر نموذج وصلة أولاً."
+          : "Choose your Wasla model first.",
+      );
+      return;
+    }
     if (!dealIntent) {
+      setDealDirectionPickerOpen(true);
       notify.info(
         language === "ar"
           ? "اختر أولاً: هل تريد الشراء أم البيع؟"
@@ -1099,7 +1284,8 @@ function ConsoleShell({
       return;
     }
     setLeadCountPickerOpen(false);
-    const nextMessages: ChatMessage[] = [
+    const retryingLastMessage = consoleMessages.at(-1)?.role === 'user' && consoleMessages.at(-1)?.text === text;
+    const nextMessages: ChatMessage[] = retryingLastMessage ? [...consoleMessages] : [
       ...consoleMessages,
       { role: "user", text },
     ];
@@ -1112,16 +1298,33 @@ function ConsoleShell({
       setSelectedLeadType(effectiveLeadType);
     setConsoleMessages(nextMessages);
     setChatInput("");
+    const websiteUrl = websiteInputUrl(text);
+    if (websiteUrl) {
+      setBusy(true); setActivityMode('thinking');
+      const epoch = ++replyRequestEpoch.current;
+      try {
+        const job = await startWebsiteRead(websiteUrl, activeChatId, language);
+        if (epoch !== replyRequestEpoch.current) return;
+        setConsoleMessages([...nextMessages,{role:'assistant',text:'',websiteRead:job}]);
+        setLeadCountPickerOpen(false);
+        setIntake(current=>({...current,confidence:Math.min(current.confidence,50),missing:[language==='ar'?'تأكيد ما فهمته من الموقع':'Confirm website understanding']}));
+      } catch(error) { if(epoch===replyRequestEpoch.current){setChatInput(text);notify.warning(apiErrorMessage(error));} }
+      finally {if(epoch===replyRequestEpoch.current){setBusy(false);setActivityMode('idle');}}
+      return;
+    }
+    const requestedQuantity = parseReadyLeadQuantity(text);
+    if (intake.confidence === 100 && requestedQuantity !== null) {
+      await runConsoleFetch(intake, requestedQuantity);
+      return;
+    }
     if (intake.confidence === 100 && isLeadLaunchConfirmation(text)) {
       setLeadCountPickerOpen(true);
       return;
     }
     setBusy(true);
-    setActivityMode(
-      dealIntent === "sell" || isLeadSearchRequest(text)
-        ? "thinking"
-        : "answering",
-    );
+    setActivityMode("thinking");
+    const replyStarted = performance.now();
+    const replyEpoch = ++replyRequestEpoch.current;
     setResearchPhase(0);
     const phaseTimer = window.setInterval(
       () => setResearchPhase((current) => Math.min(current + 1, 3)),
@@ -1150,6 +1353,7 @@ function ConsoleShell({
     const listingContext = companyListings.length
       ? ` ${language === "ar" ? "الشركات المتاحة في دليل وصلة" : "Companies available in Wasla listings"}: ${companyListings.map((listing) => `${listing.name} (${listing.industry}, ${listing.location})`).join("; ")}.`
       : "";
+    try {
     const [result] = await Promise.all([
       converseWithWasla(
         text,
@@ -1163,13 +1367,29 @@ function ConsoleShell({
         effectiveLeadType,
         intake.b2cPlanning,
         chatReasoningMode,
+        selectedWaslaModel,
       ),
       new Promise((resolve) => window.setTimeout(resolve, 420)),
     ]);
     window.clearInterval(phaseTimer);
+    if (replyEpoch !== replyRequestEpoch.current) return;
     setResearchPhase(3);
-    if (result.mode === "lead") {
-      setIntake(result.intake);
+    if (result.tenderOffer && result.mode !== 'lead') setLeadCountPickerOpen(false);
+    if (result.mode === "lead" && !isSmallTalkTurn(text)) {
+      setIntake((current) => ({
+        ...result.intake,
+        ...(result.intake.channel === "b2b" && result.intake.model !== "astraeus_ultra"
+          ? {
+              signalSource: current.signalSource,
+              signalPostUrls: [
+                ...new Set([
+                  ...(current.signalPostUrls || []),
+                  ...(result.intake.signalPostUrls || []),
+                ]),
+              ].slice(0, 8),
+            }
+          : {}),
+      }));
       setLeadCountPickerOpen(result.intake.confidence === 100);
     }
     setConsoleMessages([
@@ -1177,10 +1397,27 @@ function ConsoleShell({
       {
         role: "assistant",
         text: result.text,
+        tenderOffer: result.tenderOffer,
+        responseMs: Math.round(performance.now() - replyStarted),
+        repliedAt: Date.now(),
       },
     ]);
     setBusy(false);
     setActivityMode("idle");
+    // The customer may ask for a count while the server recovers an already
+    // confirmed brief (e.g. after reload). Honor that exact count, not a preset.
+    if (requestedQuantity !== null && result.mode === 'lead' && result.intake.confidence === 100) {
+      await runConsoleFetch(result.intake, requestedQuantity);
+    }
+    } catch (error) {
+      if (replyEpoch === replyRequestEpoch.current) {
+        setChatInput(text);
+        notify.warning(apiErrorMessage(error, language === 'ar' ? 'تعذر الرد الآن. محادثتك وسياقك محفوظان؛ حاول مجدداً.' : 'Could not reply just now. Your conversation and context are kept; please retry.'));
+      }
+    } finally {
+      window.clearInterval(phaseTimer);
+      if (replyEpoch === replyRequestEpoch.current) { setBusy(false); setActivityMode('idle'); }
+    }
   }
 
   async function runConsoleFetch(
@@ -1189,10 +1426,28 @@ function ConsoleShell({
     leadType: "b2c" | "b2b" = mission.channel === "b2c" ? "b2c" : "b2b",
   ) {
     if (busy || generationLock.current || mission.confidence < 100) return;
+    if (!availableModels[mission.model === "astraeus_ultra" ? "ultra" : leadType]) {
+      notify.info(language === "ar" ? "هذا النموذج يحتاج موافقة الإدارة قبل بدء البحث." : "This model needs admin approval before starting a search.");
+      return;
+    }
     if (leadWorkspace.running) {
+      setActiveLeadSessionJobId(leadWorkspace.job?.id || null);
+      setLeadCountPickerOpen(false);
+      notify.info(
+        language === "ar"
+          ? "البحث الحالي ما زال جارياً"
+          : "Your current search is still running",
+        {
+          description:
+            language === "ar"
+              ? "يمكنك متابعة تقدمه هنا."
+              : "You can follow its progress here.",
+        },
+      );
       selectTab("agent");
       return;
     }
+    const launchReplyStarted = performance.now();
     generationLock.current = true;
     setStartingLeadSearch(true);
     setLeadCountPickerOpen(false);
@@ -1215,6 +1470,7 @@ function ConsoleShell({
         { ...mission, channel: leadType },
         dealIntent ?? "sell",
         targetLeadCount,
+        chatReasoningMode === "fast" ? "fast" : "high",
       );
       // The server is the source of truth for quantity. Using its confirmed
       // value prevents a stale picker/render from saying 50 while a 200-lead
@@ -1225,15 +1481,15 @@ function ConsoleShell({
       );
       leadWorkspace.acceptJob(job);
       setActiveLeadSessionJobId(job.id);
-      notify.success(
+      notify.info(
         language === "ar"
-          ? "بدأت وصلة البحث عن عملائك."
-          : "Wasla is finding your leads.",
+          ? "تم إدراج بحثك في قائمة التشغيل."
+          : "Your lead search is queued.",
         {
           description:
             language === "ar"
-              ? `سنضيف العملاء المؤهلين تلقائياً حتى نصل إلى ${confirmedTargetLeadCount}.`
-              : `Qualified leads will appear automatically as Wasla works toward ${confirmedTargetLeadCount}.`,
+              ? `العدد المطلوب ${confirmedTargetLeadCount}. تابع حالة البحث والنتائج هنا.`
+              : `Requested: ${confirmedTargetLeadCount}. Follow the search status and results here.`,
           action: {
             label: language === "ar" ? "عرض العملاء" : "View leads",
             onAction: () => selectTab("leads"),
@@ -1247,15 +1503,17 @@ function ConsoleShell({
           role: "user",
           text:
             language === "ar"
-              ? "بدأ بحث عن " + confirmedTargetLeadCount + " عميلاً."
-              : "Started a search for " + confirmedTargetLeadCount + " leads.",
+              ? "طلب بحث عن " + confirmedTargetLeadCount + " عميلاً."
+              : "Requested a search for " + confirmedTargetLeadCount + " leads.",
         },
         {
           role: "assistant",
           text:
             language === "ar"
-              ? "بدأ البحث. ستجد النتائج في قسم العملاء فور وصولها. يمكنك متابعة المحادثة معي أثناء البحث."
-              : "Your search has started. Results will appear in Leads as they arrive. You can keep chatting with me while it runs.",
+              ? "تم إدراج بحثك للتشغيل. ستظهر حالة البحث والنتائج هنا؛ يمكنك متابعة المحادثة أثناء ذلك."
+              : "Your search is queued. Its status and results will appear here; you can keep chatting while it runs.",
+          responseMs: Math.round(performance.now() - launchReplyStarted),
+          repliedAt: Date.now(),
         },
       ]);
       setWorkspaceStarted(true);
@@ -1451,9 +1709,11 @@ function ConsoleShell({
                           tooltip={tabLabels[key]}
                           data-tour={key}
                           aria-current={activeTab === key ? "page" : undefined}
+                          disabled={consoleSectionLocked(key, user?.isAdmin)}
                         >
                           <Icon size={17} />
                           <span>{tabLabels[key]}</span>
+                          {consoleSectionLocked(key, user?.isAdmin) && <Lock size={13} aria-hidden="true" />}
                           {key === "leads" && (
                             <small className="dashboard-nav-count">
                               {user?.isAdmin ? adminLeadTotal : leads.length}
@@ -1473,7 +1733,9 @@ function ConsoleShell({
                   <SidebarMenuItem>
                     <SidebarMenuButton
                       tooltip={
-                        language === "ar" ? "كيف تستخدم وصلة" : "Getting started"
+                        language === "ar"
+                          ? "كيف تستخدم وصلة"
+                          : "Getting started"
                       }
                       onClick={() => {
                         setSidebarCollapsed(true);
@@ -1569,10 +1831,7 @@ function ConsoleShell({
           <SidebarInset className="hconsole-main">
             <Card className="hconsole-topbar">
               <Card.Content>
-                <div
-                  className="hconsole-context"
-                  style={{ paddingRight: "36px", paddingLeft: "36px" }}
-                >
+                <div className="hconsole-context">
                   <span>
                     <CircleDot size={12} />{" "}
                     {user?.business ??
@@ -1644,13 +1903,6 @@ function ConsoleShell({
                                 <MessageSquare size={14} />
                                 <span>
                                   <strong>{thread.title}</strong>
-                                  <small>
-                                    {new Date(
-                                      thread.updatedAt,
-                                    ).toLocaleDateString(
-                                      language === "ar" ? "ar-SA" : "en-GB",
-                                    )}
-                                  </small>
                                 </span>
                               </button>
                             ))}
@@ -1675,8 +1927,9 @@ function ConsoleShell({
                 <TabsTrigger value="overview">{tabLabels.overview}</TabsTrigger>
                 <TabsTrigger value="agent">{tabLabels.agent}</TabsTrigger>
                 <TabsTrigger value="leads">{tabLabels.leads}</TabsTrigger>
+                <TabsTrigger value="crm">{tabLabels.crm}</TabsTrigger>
                 <TabsTrigger value="persona">{tabLabels.persona}</TabsTrigger>
-                <TabsTrigger value="researched">
+                <TabsTrigger value="researched" disabled={!user?.isAdmin}>
                   {tabLabels.researched}
                 </TabsTrigger>
                 {user?.isAdmin ? (
@@ -1702,35 +1955,56 @@ function ConsoleShell({
                   busy={busy}
                   chatInput={chatInput}
                   consoleMessages={consoleMessages}
+                  onWebsiteReadUpdate={job=>setConsoleMessages(current=>current.map(item=>item.websiteRead?.id===job.id?{...item,websiteRead:job,...(job.status==='completed'?{text:job.text||'',responseMs:Date.now()-Date.parse(job.created_at),repliedAt:Date.now()}:{})}:item))}
                   intake={intake}
+                  onSignalChange={(patch) =>
+                    setIntake((current) => ({ ...current, ...patch }))
+                  }
+                  onOpenSignal={async (id) => {
+                    try {
+                      const job = await fetchLeadJob(id);
+                      leadWorkspace.acceptJob(job);
+                      setActiveLeadSessionJobId(id);
+                    } catch (error) {
+                      notify.danger(
+                        apiErrorMessage(error, "Could not open this run"),
+                      );
+                    }
+                  }}
                   language={language}
                   availableCredits={leadWorkspace.credits}
                   leadCountPickerOpen={leadCountPickerOpen}
                   reasoningModePickerOpen={reasoningModePickerOpen}
                   leadTypePickerOpen={leadTypePickerOpen}
                   dealDirectionPickerOpen={dealDirectionPickerOpen}
+                  leadTypeChosen={leadTypeChosen}
                   reasoningMode={chatReasoningMode}
                   selectedLeadType={selectedLeadType}
-                  availableLeadTypes={availableLeadTypes}
+                  selectedWaslaModel={selectedWaslaModel}
+                  availableModels={availableModels}
                   leadJob={startingLeadSearch ? null : leadWorkspace.job}
-                  leadStream={leadWorkspace.jobLeads}
-                  leadSourcing={startingLeadSearch || Boolean(activeLeadSessionJobId && leadWorkspace.job?.id === activeLeadSessionJobId && leadWorkspace.running)}
-                  leadPanelActive={startingLeadSearch || Boolean(activeLeadSessionJobId && leadWorkspace.job?.id === activeLeadSessionJobId)}
+                  leadStream={startingLeadSearch ? [] : leadWorkspace.jobLeads}
+                  leadPanelActive={
+                    startingLeadSearch ||
+                    Boolean(
+                      activeLeadSessionJobId &&
+                      leadWorkspace.job?.id === activeLeadSessionJobId,
+                    )
+                  }
                   onInputChange={setChatInput}
                   intent={dealIntent}
                   onRun={(targetLeadCount) =>
                     runConsoleFetch(
                       intake,
                       targetLeadCount,
-                      selectedLeadType ?? "b2b",
+                      selectedLeadType ?? intake.channel ?? "b2b",
                     )
                   }
                   onLeadCountPickerChange={setLeadCountPickerOpen}
                   onReasoningModeSelect={(mode) => {
                     setChatReasoningMode(mode);
                     setReasoningModePickerOpen(false);
-                    if (availableLeadTypes.length === 1) {
-                      setSelectedLeadType(availableLeadTypes[0]);
+                    if (leadTypeChosen) {
                       setLeadTypePickerOpen(false);
                       setDealDirectionPickerOpen(true);
                     } else {
@@ -1738,9 +2012,12 @@ function ConsoleShell({
                     }
                   }}
                   onLeadTypeSelect={(leadType) => {
+                    if (!availableModels[leadType]) return;
                     setSelectedLeadType(
-                      leadType === "unsure" ? null : leadType,
+                      leadType === "ultra" ? "b2b" : leadType,
                     );
+                    setSelectedWaslaModel(leadType);
+                    setLeadTypeChosen(true);
                     setLeadTypePickerOpen(false);
                     setDealDirectionPickerOpen(true);
                   }}
@@ -1750,11 +2027,15 @@ function ConsoleShell({
                     setConsoleMessages([
                       {
                         role: "assistant",
-                        text: openingMissionQuestion(
-                          selectedLeadType,
-                          intent,
-                          language,
-                        ),
+                        text: selectedWaslaModel === "ultra"
+                          ? chatReasoningMode === "fast"
+                            ? language === "ar"
+                              ? "ما نوع الشركات التي تستهدفها في السعودية، ومن صاحب القرار الذي تريد التواصل معه؟"
+                              : "Which kinds of companies in Saudi Arabia are you targeting, and which decision-maker role should I find?"
+                            : language === "ar"
+                              ? "ما المنتج أو الخدمة التي تقدمها، وما النتيجة الأساسية التي يحصل عليها عميلك؟"
+                              : "What product or service do you offer, and what concrete result does a customer get from it?"
+                          : openingMissionQuestion(selectedLeadType, intent, language),
                       },
                     ]);
                     setIntake({
@@ -1779,7 +2060,48 @@ function ConsoleShell({
                       apifyActor: "",
                       apifyInput: {},
                       channel: selectedLeadType ?? undefined,
+                      ...(selectedWaslaModel === "ultra" ? { model: "astraeus_ultra" as const } : {}),
                     });
+                  }}
+                  onReasoningModePickerClose={() =>
+                    setReasoningModePickerOpen(false)
+                  }
+                  onLeadTypePickerClose={() => setLeadTypePickerOpen(false)}
+                  onDirectionPickerClose={() =>
+                    setDealDirectionPickerOpen(false)
+                  }
+                  onModelChange={(modelChoice) => {
+                    if (!availableModels[modelChoice]) return;
+                    setSelectedWaslaModel(modelChoice);
+                    const leadType =
+                      modelChoice === "ultra" ? "b2b" : modelChoice;
+                    setSelectedLeadType(leadType);
+                    setLeadTypeChosen(true);
+                    setIntake((current) => ({
+                      ...current,
+                      channel: leadType ?? undefined,
+                      model: modelChoice === "ultra" ? "astraeus_ultra" : undefined,
+                      confidence: 0,
+                      apifyInput: {},
+                      businessUnderstanding: undefined,
+                    }));
+                  }}
+                  onReasoningModeChange={(mode) => {
+                    setChatReasoningMode(mode);
+                    setIntake((current) => ({
+                      ...current,
+                      confidence: 0,
+                      businessUnderstanding: undefined,
+                    }));
+                  }}
+                  onResumeSetup={() => {
+                    if (!chatReasoningMode) {
+                      setReasoningModePickerOpen(true);
+                    } else if (!leadTypeChosen) {
+                      setLeadTypePickerOpen(true);
+                    } else if (!dealIntent) {
+                      setDealDirectionPickerOpen(true);
+                    }
                   }}
                   onInsufficientCredits={(targetLeadCount) => {
                     setCreditAlert({
@@ -1804,7 +2126,9 @@ function ConsoleShell({
               </TabsContent>
               <TabsContent value="leads">
                 {user?.isAdmin ? (
-                  <AdminLeadExplorer onInventoryLoaded={handleAdminInventoryLoaded} />
+                  <AdminLeadExplorer
+                    onInventoryLoaded={handleAdminInventoryLoaded}
+                  />
                 ) : (
                   <CoreLeadsWorkspace
                     leads={leads}
@@ -1818,10 +2142,14 @@ function ConsoleShell({
                     onRefresh={leadWorkspace.refresh}
                     onChat={() => selectTab("agent")}
                     onResearch={handleResearch}
+                    onPersona={() => selectTab("persona")}
                   />
                 )}
               </TabsContent>
 
+              <TabsContent value="crm">
+                <LeadPipelineBoard leads={leads} language={language} onPersona={() => selectTab("persona")} onRefreshLeads={leadWorkspace.refresh} />
+              </TabsContent>
               <TabsContent value="persona">
                 <BusinessPersonaWorkspace language={language} />
               </TabsContent>
@@ -2198,6 +2526,35 @@ function WorkspaceLeadSearch({
   onClose: () => void;
   onOpenLead: (lead: Lead) => void;
 }) {
+  const leadIntentLabel = (lead: Lead) => {
+    const intent =
+      [lead.industry, ...lead.tags]
+        .map((value) => String(value || "").trim())
+        .find(
+          (value) =>
+            value &&
+            !/^(b2b|b2c|wasla(?:-|\s)?lite|wasla(?:-|\s)?astraeus)$/i.test(
+              value,
+            ),
+        ) || lead.company;
+
+    return language === "ar"
+      ? `يبحث عن · ${intent}`
+      : `Looking for · ${intent}`;
+  };
+
+  const leadContactLabel = (lead: Lead) => {
+    if (lead.phone && lead.email) {
+      return language === "ar" ? "هاتف وبريد متاحان" : "Phone + email";
+    }
+    if (lead.phone) return language === "ar" ? "قابل للاتصال" : "Callable";
+    if (lead.email)
+      return language === "ar" ? "البريد متاح" : "Email available";
+    if (lead.website)
+      return language === "ar" ? "الموقع متاح" : "Website available";
+    return language === "ar" ? "ملف العميل جاهز" : "Lead profile ready";
+  };
+
   const normalized = query.trim().toLocaleLowerCase();
   const matches = leads
     .filter(
@@ -2276,14 +2633,15 @@ function WorkspaceLeadSearch({
               onClick={() => onOpenLead(lead)}
             >
               <span
-                className={`lead-type-indicator is-${/b2c/i.test(lead.source) ? "b2c" : "b2b"}`}
+                className={`workspace-lead-search__intent is-${/b2c/i.test(lead.source) ? "b2c" : "b2b"}`}
+                title={leadIntentLabel(lead)}
               >
                 {/b2c/i.test(lead.source) ? (
                   <UserPlus size={13} />
                 ) : (
                   <Building2 size={13} />
                 )}
-                {/b2c/i.test(lead.source) ? "B2C" : "B2B"}
+                <span>{leadIntentLabel(lead)}</span>
               </span>
               <span>
                 <strong>{lead.name}</strong>
@@ -2291,8 +2649,8 @@ function WorkspaceLeadSearch({
                   {lead.title} · {lead.company}
                 </small>
               </span>
-              <span>
-                <b>{lead.fitScore}%</b>
+              <span className="workspace-lead-search__availability">
+                <b>{leadContactLabel(lead)}</b>
                 <small>{lead.location}</small>
               </span>
               {language === "ar" ? (
@@ -2336,19 +2694,23 @@ function AgentMissionPage({
   busy,
   chatInput,
   consoleMessages,
+  onWebsiteReadUpdate,
   intake,
+  onSignalChange,
+  onOpenSignal,
   intent,
   language,
   leadCountPickerOpen,
   reasoningModePickerOpen,
   leadTypePickerOpen,
   dealDirectionPickerOpen,
+  leadTypeChosen,
   reasoningMode,
   selectedLeadType,
-  availableLeadTypes,
+  selectedWaslaModel,
+  availableModels,
   leadJob,
   leadStream,
-  leadSourcing,
   leadPanelActive,
   onInputChange,
   onRun,
@@ -2356,6 +2718,12 @@ function AgentMissionPage({
   onReasoningModeSelect,
   onLeadTypeSelect,
   onDirectionSelect,
+  onReasoningModePickerClose,
+  onLeadTypePickerClose,
+  onDirectionPickerClose,
+  onModelChange,
+  onReasoningModeChange,
+  onResumeSetup,
   onInsufficientCredits,
   onSend,
   researchPhase,
@@ -2366,19 +2734,23 @@ function AgentMissionPage({
   busy: boolean;
   chatInput: string;
   consoleMessages: ChatMessage[];
+  onWebsiteReadUpdate: (job: WebsiteRead) => void;
   intake: IntakeState;
+  onSignalChange: (patch: Partial<IntakeState>) => void;
+  onOpenSignal: (id: string) => void;
   intent: DealIntent | null;
   language: "ar" | "en";
   leadCountPickerOpen: boolean;
   reasoningModePickerOpen: boolean;
   leadTypePickerOpen: boolean;
   dealDirectionPickerOpen: boolean;
+  leadTypeChosen: boolean;
   reasoningMode: ChatReasoningMode | null;
   selectedLeadType: "b2c" | "b2b" | null;
-  availableLeadTypes: Array<"b2b" | "b2c">;
+  selectedWaslaModel: WaslaModelChoice | null;
+  availableModels: Record<WaslaModelChoice, boolean>;
   leadJob: LeadJob | null;
   leadStream: Lead[];
-  leadSourcing: boolean;
   leadPanelActive: boolean;
   onInputChange: (value: string) => void;
   onRun: (targetLeadCount: number) => void;
@@ -2386,13 +2758,43 @@ function AgentMissionPage({
   onReasoningModeSelect: (mode: ChatReasoningMode) => void;
   onLeadTypeSelect: (leadType: LeadTypeChoice) => void;
   onDirectionSelect: (intent: DealIntent) => void;
+  onReasoningModePickerClose: () => void;
+  onLeadTypePickerClose: () => void;
+  onDirectionPickerClose: () => void;
+  onModelChange: (model: WaslaModelChoice) => void;
+  onReasoningModeChange: (mode: ChatReasoningMode) => void;
+  onResumeSetup: () => void;
   onInsufficientCredits: (targetLeadCount: number) => void;
   onSend: () => void;
   researchPhase: number;
   user: AuthUser | null;
 }) {
   const ready = intake.confidence === 100;
+  const setupComplete = Boolean(reasoningMode && leadTypeChosen && intent);
+  const composerInputRef = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const input = composerInputRef.current;
+    if (!input) return;
+    const resize = () => {
+      input.style.height = "0px";
+      const maximum = Math.min(200, window.innerHeight * 0.28);
+      input.style.height = `${Math.min(input.scrollHeight, maximum)}px`;
+      input.style.overflowY = input.scrollHeight > maximum ? "auto" : "hidden";
+    };
+    resize();
+    const observer = new ResizeObserver(resize);
+    const composer = input.parentElement;
+    if (composer) observer.observe(composer, { box: "border-box" });
+    window.addEventListener("resize", resize);
+    return () => { observer.disconnect(); window.removeEventListener("resize", resize); };
+  }, [chatInput, language]);
+  const setupModalOpen =
+    reasoningModePickerOpen || leadTypePickerOpen || dealDirectionPickerOpen;
   const [promptIndex, setPromptIndex] = useState(0);
+  const [showSignalRun, setShowSignalRun] = useState(true);
+  useEffect(() => {
+    setShowSignalRun(true);
+  }, [leadJob?.id]);
   const conversationRef = useRef<HTMLDivElement>(null);
   const promptExamples =
     language === "ar"
@@ -2461,437 +2863,800 @@ function AgentMissionPage({
     });
   }, [activityMode, busy, consoleMessages, leadCountPickerOpen]);
 
+  if (leadPanelActive && leadJob?.provider === "signal" && showSignalRun) {
+    return (
+      <section className="ops-agent-page signal-page" data-tour="agent">
+        <SignalWorkspace
+          id={leadJob.id}
+          language={language}
+          onBack={() => setShowSignalRun(false)}
+        />
+      </section>
+    );
+  }
   return (
-    <section className="ops-agent-page" data-tour="agent">
+    <section
+      className="ops-agent-page"
+      data-tour="agent"
+      dir={language === "ar" ? "rtl" : "ltr"}
+    >
       <div className="ops-agent-page__top">
         <div>
           <span />{" "}
-          {busy
+          {leadPanelActive && searchActivity(leadJob, language).running
             ? language === "ar"
-              ? "البحث جارٍ"
-              : "Research in progress"
-            : language === "ar"
-              ? "جاهز للمحادثة"
-              : "Ready to chat"}
+              ? "البحث عن العملاء جارٍ"
+              : "Finding leads"
+            : busy
+              ? language === "ar"
+                ? "جارٍ التفكير…"
+                : "Thinking…"
+              : language === "ar"
+                ? "جاهز للمحادثة"
+                : "Ready to chat"}
         </div>
         <strong>
           {language === "ar" ? "محادثة جديدة" : "New conversation"}
         </strong>
       </div>
 
-      <div dir={language === "ar" ? "rtl" : "ltr"} className={`ops-chat-workspace${leadPanelActive ? " is-sourcing" : ""}`}>
-        {leadPanelActive ? (
-          <LiveLeadStream job={leadJob} leads={leadStream} language={language} />
+      <div
+        dir={language === "ar" ? "rtl" : "ltr"}
+        className={`ops-chat-workspace${leadPanelActive && leadJob?.provider !== "signal" ? " is-sourcing" : ""}`}
+      >
+        {leadPanelActive && leadJob?.provider !== "signal" ? (
+          <LiveLeadStream
+            job={leadJob}
+            leads={leadStream}
+            language={language}
+          />
         ) : null}
         <div
           className={`ops-chat-stage${consoleMessages.length ? " has-conversation" : ""}`}
         >
-        {intent ? (
-          <span className={`ops-intent-badge is-${intent ?? "sell"}`}>
-            <i />
-            {selectedLeadType === "b2c"
-              ? language === "ar"
-                ? "عملاء أفراد B2C"
-                : "B2C leads"
-              : selectedLeadType === "b2b"
+          {intent ? (
+            <span className={`ops-intent-badge is-${intent ?? "sell"}`}>
+              <i />
+              {selectedWaslaModel === "ultra"
                 ? language === "ar"
-                  ? "عملاء شركات B2B"
-                  : "B2B leads"
-                : language === "ar"
-                  ? "سأحدد نوع العميل معك"
-                  : "Lead type will be inferred"}
-          </span>
-        ) : null}
-        {reasoningMode ? (
-          <span className={`ops-reasoning-badge is-${reasoningMode}`}>
-            {reasoningMode === "fast" ? (
-              <Activity size={13} />
-            ) : (
-              <BrainCircuit size={13} />
-            )}
-            {reasoningMode === "fast"
-              ? language === "ar"
-                ? "سريع 1.5×"
-                : "Fast 1.5×"
-              : language === "ar"
-                ? "استدلال عميق"
-                : "High reasoning"}
-          </span>
-        ) : null}
-        <header className="ops-chat-stage__intro">
-          <span>
-            {language === "ar"
-              ? "محادثة تحول الوصف إلى عملاء"
-              : "A conversation that turns intent into leads"}
-          </span>
-          <h1 key={`${language}-${promptIndex}`}>
-            {consoleMessages.length
-              ? language === "ar"
-                ? "من تريد أن تصل إليه؟"
-                : "Who do you want to reach?"
-              : promptExamples[promptIndex]}
-          </h1>
-          <p>
-            {language === "ar"
-              ? "اكتب طلبك كما تقوله لزميل. سأفهمه معك، ثم أنقل النتائج مباشرة إلى قسم العملاء."
-              : "Ask the way you would ask a colleague. I’ll refine it with you, then stream verified results directly into Leads."}
-          </p>
-        </header>
-
-        <div
-          className="ops-agent-page__conversation"
-          aria-live="polite"
-          ref={conversationRef}
-        >
-          {consoleMessages.map((message, index) => (
-            <div
-              className={`ops-chat-message is-${message.role}`}
-              key={`${message.role}-${index}-${message.text}`}
-            >
-              <span className="ops-chat-message__mark">
-                {message.role === "assistant" ? (
-                  <WaslaBrand variant="symbol" inverse />
-                ) : (
-                  (user?.name?.slice(0, 1) ?? "Y")
-                )}
-              </span>
-              <div className="ops-chat-message__content">
-                <ReactMarkdown
-                  components={{
-                    a: ({ children, ...props }) => (
-                      <a {...props} target="_blank" rel="noreferrer">
-                        {children}
-                      </a>
-                    ),
-                  }}
-                >
-                  {message.role === "assistant"
-                    ? scanFriendlyAssistantText(message.text)
-                    : message.text}
-                </ReactMarkdown>
-              </div>
-            </div>
-          ))}
-          {leadCountPickerOpen && ready && !busy ? (
-            <div
-              className="chat-lead-options"
-              role="group"
-              aria-label={
-                language === "ar" ? "اختر عدد العملاء" : "Choose lead count"
-              }
-            >
-              <div>
-                <strong>
-                  {language === "ar"
-                    ? "كم عميلاً تريد؟"
-                    : "How many leads do you want?"}
-                </strong>
-                <small>
-                  {language === "ar"
-                    ? "10 أرصدة = عميل واحد"
-                    : "10 credits = 1 fetched lead"}
-                </small>
-              </div>
-              <div>
-                {[30, 50, 200].map((count) => {
-                  const affordable = availableCredits >= count * 10;
-                  return (
-                    <button
-                      key={count}
-                      type="button"
-                      className={affordable ? "" : "is-unaffordable"}
-                      aria-disabled={!affordable}
-                      data-disabled-reason={
-                        affordable
-                          ? undefined
-                          : language === "ar"
-                            ? "رصيدك غير كافٍ — اشترك لتوليد العملاء مجدداً"
-                            : "You’re out of credits — subscribe to generate again"
-                      }
-                      onClick={() => {
-                        if (!affordable) {
-                          onInsufficientCredits(count);
-                          return;
-                        }
-                        onLeadCountPickerChange(false);
-                        onRun(count);
-                      }}
-                    >
-                      {!affordable ? (
-                        <X className="ops-lead-count-picker__x" size={17} />
-                      ) : null}
-                      <strong>{count}</strong>
-                      <small>
-                        {count * 10} {language === "ar" ? "رصيد" : "credits"}
-                      </small>
-                    </button>
-                  );
-                })}
-                <button
-                  className="ops-lead-count-picker__cancel"
-                  type="button"
-                  onClick={() => onLeadCountPickerChange(false)}
-                >
-                  {language === "ar" ? "متابعة المحادثة" : "Keep chatting"}
-                </button>
-              </div>
-            </div>
-          ) : null}
-
-          {busy || leadSourcing ? (
-            <ResearchActivity
-              language={language}
-              mode={leadSourcing ? "sourcing" : activityMode}
-              phase={researchPhase}
-            />
-          ) : null}
-        </div>
-
-        <BorderBeam className="ops-chat-composer-beam" size="md" colorVariant="colorful" strength={0.7} theme="dark" active={!busy}>
-          <div className="ops-chat-composer">
-            <input
-              value={chatInput}
-              onChange={(event) => onInputChange(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  onSend();
-                }
-              }}
-              placeholder={
-                !reasoningMode
+                  ? "عملاء Wasla-Astraeus Ultra"
+                  : "Wasla-Astraeus Ultra leads"
+                : selectedLeadType === "b2c"
+                ? language === "ar"
+                  ? "عملاء Wasla-Lite"
+                  : "Wasla-Lite leads"
+                : selectedLeadType === "b2b"
                   ? language === "ar"
-                    ? "اختر سرعة المحادثة أولاً"
-                    : "Choose a conversation mode first"
-                  : !intent
-                  ? language === "ar"
-                    ? "اختر الشراء أو البيع أولاً"
-                    : "Choose Buy or Sell first"
-                  : `${language === "ar" ? "مثال" : "Example"}: ${promptExamples[0]}`
-              }
-              aria-label={
-                language === "ar" ? "اكتب رسالة إلى وصلة" : "Message Wasla"
-              }
-              disabled={!intent || !reasoningMode}
-            />
-            <span className="ops-chat-composer__sparkle" aria-hidden="true">
-              <Sparkles size={22} />
+                    ? "عملاء Wasla-Astraeus"
+                    : "Wasla-Astraeus leads"
+                  : language === "ar"
+                    ? "سأحدد نوع العميل معك"
+                    : "Lead type will be inferred"}
             </span>
-            <LiquidMetalSubmitButton
-              onClick={onSend}
-              disabled={busy || !intent || !reasoningMode}
-              label={language === "ar" ? "إرسال الرسالة" : "Send message"}
-            >
-              {language === "ar" ? (
-                <ArrowUpLeft size={34} />
+          ) : null}
+          {reasoningMode ? (
+            <span className={`ops-reasoning-badge is-${reasoningMode}`}>
+              {reasoningMode === "fast" ? (
+                <Activity size={13} />
               ) : (
-                <ArrowUpRight size={34} />
+                <BrainCircuit size={13} />
               )}
-            </LiquidMetalSubmitButton>
-          </div>
-        </BorderBeam>
+              {reasoningMode === "fast"
+                ? language === "ar"
+                  ? "سريع 1.5×"
+                  : "Fast 1.5×"
+                : language === "ar"
+                  ? "استدلال عميق"
+                  : "High reasoning"}
+            </span>
+          ) : null}
+          <header className="ops-chat-stage__intro">
+            <span>
+              {language === "ar"
+                ? "محادثة تحول الوصف إلى عملاء"
+                : "A conversation that turns intent into leads"}
+            </span>
+            <h1 key={`${language}-${promptIndex}`}>
+              {consoleMessages.length
+                ? language === "ar"
+                  ? "اختر المودل المستحب"
+                  : "Choose your Wasla Model"
+                : promptExamples[promptIndex]}
+            </h1>
+            <p>
+              {language === "ar"
+                ? "اكتب طلبك كما تقوله لزميل. سأفهمه معك، ثم أنقل النتائج مباشرة إلى قسم العملاء."
+                : "Ask the way you would ask a colleague. I’ll refine it with you, then stream verified results directly into Leads."}
+            </p>
+          </header>
 
-        {reasoningModePickerOpen ? (
-          <LeadSetupModal
-            title={
-              language === "ar"
-                ? "كيف تريد أن تفكر وصلة؟"
-                : "How should Wasla think?"
-            }
-            description={
-              language === "ar"
-                ? "اختر سرعة التأهيل قبل بدء هذه المحادثة."
-                : "Choose the qualification depth before this conversation starts."
-            }
-            choices={[
-              {
-                id: "fast",
-                icon: Activity,
-                title:
-                  language === "ar" ? "تلقين سريع 1.5×" : "Fast prompting 1.5×",
-                body:
-                  language === "ar"
-                    ? "من 3 إلى 5 أسئلة ذكية كحد أقصى"
-                    : "A maximum of 3–5 focused questions",
-              },
-              {
-                id: "high",
-                icon: BrainCircuit,
-                title:
-                  language === "ar" ? "استدلال عميق" : "High reasoning",
-                body:
-                  language === "ar"
-                    ? "يفهم منطق النشاط وسلسلة القيمة قبل الاستهداف"
-                    : "Understands the business logic and value chain first",
-              },
-            ]}
-            onChoose={(id) =>
-              onReasoningModeSelect(id as ChatReasoningMode)
-            }
-          />
-        ) : null}
-
-        {leadTypePickerOpen ? (
-          <LeadSetupModal
-            title={
-              language === "ar"
-                ? "من تريد الوصول إليه؟"
-                : "Who do you want to reach?"
-            }
-            description={
-              language === "ar"
-                ? "اختر نوع العملاء لهذه المحادثة الجديدة."
-                : "Choose the lead type for this new conversation."
-            }
-            choices={[
-              {
-                id: "b2c",
-                icon: UserPlus,
-                title: "B2C",
-                body:
-                  language === "ar"
-                    ? "أفراد ومستهلكون"
-                    : "People and consumers",
-              },
-              {
-                id: "b2b",
-                icon: Building2,
-                title: "B2B",
-                body:
-                  language === "ar"
-                    ? "شركات وصناع قرار"
-                    : "Companies and decision-makers",
-              },
-              ...(availableLeadTypes.length > 1
-                ? [
-                    {
-                      id: "unsure",
-                      icon: Sparkles,
-                      title: language === "ar" ? "لست متأكداً" : "Not sure",
-                      body:
-                        language === "ar"
-                          ? "سأفهم طلبك وأحدد النوع"
-                          : "I’ll understand your need and infer it",
-                    },
-                  ]
-                : []),
-            ].filter(
-              (choice) =>
-                choice.id === "unsure" ||
-                availableLeadTypes.includes(choice.id as "b2b" | "b2c"),
+          <div
+            className="ops-agent-page__conversation"
+            aria-live="polite"
+            ref={conversationRef}
+          >
+            {consoleMessages.map((message, index) => (
+              <div
+                className={`ops-chat-message is-${message.role}`}
+                key={`${message.role}-${index}-${message.text}`}
+              >
+                <span className="ops-chat-message__mark">
+                  {message.role === "assistant" ? (
+                    <WaslaBrand variant="symbol" inverse />
+                  ) : (
+                    (user?.name?.slice(0, 1) ?? "Y")
+                  )}
+                </span>
+                <div className="ops-chat-message__content" dir={language==='ar'?'rtl':'ltr'}>
+                  {message.role === 'assistant' && !message.websiteRead && message.responseMs != null && <details className="chat-work-summary" dir={language==='ar'?'rtl':'ltr'}><summary>{language==='ar'?'مدة العمل':'Worked for'} <bdi dir="ltr">{(message.responseMs/1000).toFixed(1)}s</bdi><span aria-hidden="true">›</span></summary><small className="chat-response-time" dir={language==='ar'?'rtl':'ltr'}>{language === 'ar' ? 'زمن الرد' : 'Response time'} <bdi dir="ltr">{(message.responseMs / 1000).toFixed(1)}s</bdi></small></details>}
+                  {message.websiteRead && <WebsiteReadProgress job={message.websiteRead} ar={language==='ar'} onUpdate={onWebsiteReadUpdate}/>}
+                  {message.websiteRead && message.websiteRead.status !== 'completed' ? null : message.role === 'assistant' ? <RevealedChatReply text={scanFriendlyAssistantText(message.text)} repliedAt={message.repliedAt}/> : <ReactMarkdown
+                    components={{
+                      a: ({ children, ...props }) => (
+                        <a {...props} target="_blank" rel="noreferrer">
+                          {children}
+                        </a>
+                      ),
+                    }}
+                  >
+                    {message.text}
+                  </ReactMarkdown>
+                  }
+                  {message.tenderOffer && <ChatTenderResults offer={message.tenderOffer} ar={language === 'ar'}/>}
+                </div>
+              </div>
+            ))}
+            {leadPanelActive && leadJob?.provider !== "signal" ? (
+              <ChatSearchActivity
+                job={leadJob}
+                language={language}
+                showSocialLookup={
+                  selectedWaslaModel === "b2c"
+                }
+              />
+            ) : null}
+            {leadPanelActive && leadJob?.provider === "signal" && (
+              <button
+                className="signal-open-run"
+                onClick={() => setShowSignalRun(true)}
+              >
+                {language === "ar"
+                  ? "افتح مساحة البحث المباشر"
+                  : "Open live search workspace"}{" "}
+                ↗
+              </button>
             )}
-            onChoose={(id) => onLeadTypeSelect(id as LeadTypeChoice)}
-          />
-        ) : null}
+            {leadCountPickerOpen && ready && !busy ? (
+              <div
+                className="chat-lead-options"
+                role="group"
+                aria-label={
+                  language === "ar" ? "اختر عدد العملاء" : "Choose lead count"
+                }
+              >
+                <div>
+                  <strong>
+                    {language === "ar"
+                      ? "كم عميلاً تريد؟"
+                      : "How many leads do you want?"}
+                  </strong>
+                  <small>
+                    {language === "ar"
+                      ? "10 أرصدة = عميل واحد · أو اكتب عدداً من 1 إلى 200"
+                      : "10 credits = 1 fetched lead · Or type any number from 1 to 200"}
+                  </small>
+                </div>
+                <div>
+                  {[30, 50, 200].map((count) => {
+                    const affordable = availableCredits >= count * 10;
+                    return (
+                      <button
+                        key={count}
+                        type="button"
+                        className={affordable ? "" : "is-unaffordable"}
+                        aria-disabled={!affordable}
+                        data-disabled-reason={
+                          affordable
+                            ? undefined
+                            : language === "ar"
+                              ? "رصيدك غير كافٍ — اشترك لتوليد العملاء مجدداً"
+                              : "You’re out of credits — subscribe to generate again"
+                        }
+                        onClick={() => {
+                          if (!affordable) {
+                            onInsufficientCredits(count);
+                            return;
+                          }
+                          onLeadCountPickerChange(false);
+                          onRun(count);
+                        }}
+                      >
+                        {!affordable ? (
+                          <X className="ops-lead-count-picker__x" size={17} />
+                        ) : null}
+                        <strong>{count}</strong>
+                        <small>
+                          {count * 10} {language === "ar" ? "رصيد" : "credits"}
+                        </small>
+                      </button>
+                    );
+                  })}
+                  <button
+                    className="ops-lead-count-picker__cancel"
+                    type="button"
+                    onClick={() => onLeadCountPickerChange(false)}
+                  >
+                    {language === "ar" ? "متابعة المحادثة" : "Keep chatting"}
+                  </button>
+                </div>
+              </div>
+            ) : null}
 
-        {dealDirectionPickerOpen ? (
-          <LeadSetupModal
-            title={
-              language === "ar"
-                ? "ما هدفك من العملاء؟"
-                : "What do you want to do?"
-            }
-            description={
-              language === "ar"
-                ? "هذا يساعدني على طرح الأسئلة الصحيحة."
-                : "This helps me ask the right qualification questions."
-            }
-            choices={[
-              {
-                id: "sell",
-                icon: Target,
-                title: language === "ar" ? "أريد أن أبيع" : "I want to sell",
-                body:
-                  language === "ar"
-                    ? "اعثر على مشترين مناسبين"
-                    : "Find matched buyers",
-              },
-              {
-                id: "buy",
-                icon: Building2,
-                title: language === "ar" ? "أريد أن أشتري" : "I want to buy",
-                body:
-                  language === "ar"
-                    ? "اعثر على موردين وفرص"
-                    : "Find suppliers and opportunities",
-              },
-            ]}
-            onChoose={(id) => onDirectionSelect(id as DealIntent)}
-          />
-        ) : null}
+            {busy && (!leadPanelActive || activityMode === 'thinking') ? (
+              <ResearchActivity
+                language={language}
+                mode={activityMode}
+                phase={researchPhase}
+              />
+            ) : null}
+          </div>
+
+          {!setupComplete && !setupModalOpen ? (
+            <div className="ops-chat-setup-lock" role="status">
+              <div>
+                <UiBadge
+                  variant="outline"
+                  className="ops-chat-setup-lock__badge"
+                >
+                  {language === "ar" ? "الإعداد مطلوب" : "Setup required"}
+                </UiBadge>
+                <strong>
+                  {!reasoningMode
+                    ? language === "ar"
+                      ? "اختر سرعة التفكير للمتابعة"
+                      : "Choose how Wasla should think"
+                    : !leadTypeChosen
+                      ? language === "ar"
+                        ? "اختر نموذج وصلة للمتابعة"
+                        : "Choose your Wasla model"
+                      : language === "ar"
+                        ? "حدد هل تريد الشراء أم البيع"
+                        : "Choose whether you want to buy or sell"}
+                </strong>
+              </div>
+              <UiButton type="button" variant="outline" onClick={onResumeSetup}>
+                {language === "ar" ? "متابعة الإعداد" : "Continue setup"}
+                {language === "ar" ? <ArrowLeft /> : <ArrowRight />}
+              </UiButton>
+            </div>
+          ) : null}
+
+          <BorderBeam
+            className="ops-chat-composer-beam"
+            size="md"
+            colorVariant="colorful"
+            strength={0.7}
+            theme="dark"
+            active={!busy}
+          >
+            <div className="ops-chat-composer">
+              <textarea
+                ref={composerInputRef}
+                className="ops-chat-composer__input"
+                rows={1}
+                value={chatInput}
+                onChange={(event) => onInputChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                    event.preventDefault();
+                    if (!busy && setupComplete && chatInput.trim()) onSend();
+                  }
+                }}
+                placeholder={
+                  !reasoningMode
+                    ? language === "ar"
+                      ? "اختر سرعة المحادثة أولاً"
+                      : "Choose a conversation mode first"
+                    : !leadTypeChosen
+                      ? language === "ar"
+                        ? "اختر نموذج وصلة أولاً"
+                        : "Choose your Wasla model first"
+                      : !intent
+                        ? language === "ar"
+                          ? "اختر الشراء أو البيع أولاً"
+                          : "Choose Buy or Sell first"
+                        : `${language === "ar" ? "مثال" : "Example"}: ${promptExamples[0]}`
+                }
+                aria-label={
+                  language === "ar" ? "اكتب رسالة إلى وصلة" : "Message Wasla"
+                }
+                disabled={!setupComplete}
+              />
+              <ChatModelSelector
+                language={language}
+                model={selectedWaslaModel}
+                availableModels={availableModels}
+                reasoningMode={reasoningMode ?? "high"}
+                onModelChange={onModelChange}
+                onReasoningModeChange={onReasoningModeChange}
+              />
+              <span className="ops-chat-composer__sparkle" aria-hidden="true">
+                <Sparkles size={22} />
+              </span>
+              <LiquidMetalSubmitButton
+                onClick={() => onSend()}
+                disabled={busy || !setupComplete || !chatInput.trim()}
+                label={language === "ar" ? "إرسال الرسالة" : "Send message"}
+              >
+                {language === "ar" ? (
+                  <ArrowUpLeft size={34} />
+                ) : (
+                  <ArrowUpRight size={34} />
+                )}
+              </LiquidMetalSubmitButton>
+            </div>
+          </BorderBeam>
+
+          {reasoningModePickerOpen ? (
+            <LeadSetupModal
+              language={language}
+              title={
+                language === "ar"
+                  ? "كيف تريد أن تفكر وصلة؟"
+                  : "How should Wasla think?"
+              }
+              description={
+                language === "ar"
+                  ? "اختر سرعة التأهيل قبل بدء هذه المحادثة."
+                  : "Choose the qualification depth before this conversation starts."
+              }
+              choices={[
+                {
+                  id: "fast",
+                  icon: Activity,
+                  sticker: "FAST 1.5×",
+                  title:
+                    language === "ar"
+                      ? "تلقين سريع 1.5×"
+                      : "Fast prompting 1.5×",
+                  body:
+                    language === "ar"
+                      ? "من 3 إلى 5 أسئلة ذكية كحد أقصى"
+                      : "A maximum of 3–5 focused questions",
+                },
+                {
+                  id: "high",
+                  icon: BrainCircuit,
+                  sticker: "DEEP",
+                  title: language === "ar" ? "استدلال عميق" : "High reasoning",
+                  body:
+                    language === "ar"
+                      ? "يفهم منطق النشاط وسلسلة القيمة قبل الاستهداف"
+                      : "Understands the business logic and value chain first",
+                },
+              ]}
+              onClose={onReasoningModePickerClose}
+              onChoose={(id) => onReasoningModeSelect(id as ChatReasoningMode)}
+            />
+          ) : null}
+
+          {leadTypePickerOpen ? (
+            <LeadSetupModal
+              language={language}
+              title={language === "ar" ? "اختر نموذجك" : "Choose your model"}
+              description={
+                language === "ar"
+                  ? "اختر نموذج وصلة الأنسب لهذه المحادثة."
+                  : "Select the Wasla model for this conversation."
+              }
+              choices={[
+                {
+                  id: "b2c",
+                  icon: UserPlus,
+                  sticker: "LITE",
+                  title: "Wasla-Lite",
+                  body:
+                    language === "ar"
+                      ? "أفراد ومستهلكون"
+                      : "People and consumers",
+                },
+                {
+                  id: "b2b",
+                  icon: Building2,
+                  sticker: "ASTRAEUS",
+                  title: "Wasla-Astraeus",
+                  disabled: !availableModels.b2b,
+                  body:
+                    !availableModels.b2b
+                      ? language === "ar" ? "مقفل — يتطلب موافقة الإدارة" : "Locked — admin approval required"
+                    : language === "ar"
+                      ? "عملاء مطابقون لطلبك، مع رقم هاتف أو بدونه"
+                      : "Matching leads, with or without phone numbers",
+                },
+                {
+                  id: "ultra",
+                  icon: PhoneCall,
+                  sticker: "ULTRA",
+                  title: "Wasla-Astraeus Ultra",
+                  disabled: !availableModels.ultra,
+                  body: !availableModels.ultra
+                    ? language === "ar" ? "مقفل — يتطلب موافقة الإدارة" : "Locked — admin approval required"
+                    : language === "ar"
+                      ? "عملاء مطابقون في السعودية مع أرقام هاتف"
+                      : "Matching Saudi leads with phone numbers",
+                },
+              ]}
+              onClose={onLeadTypePickerClose}
+              onChoose={(id) => onLeadTypeSelect(id as LeadTypeChoice)}
+            />
+          ) : null}
+
+          {dealDirectionPickerOpen ? (
+            <LeadSetupModal
+              language={language}
+              title={
+                language === "ar"
+                  ? "ما هدفك من العملاء؟"
+                  : "What do you want to do?"
+              }
+              description={
+                language === "ar"
+                  ? "هذا يساعدني على طرح الأسئلة الصحيحة."
+                  : "This helps me ask the right qualification questions."
+              }
+              choices={[
+                {
+                  id: "sell",
+                  icon: Target,
+                  sticker: language === "ar" ? "بيع" : "SELL",
+                  title: language === "ar" ? "أريد أن أبيع" : "I want to sell",
+                  body:
+                    language === "ar"
+                      ? "اعثر على مشترين مناسبين"
+                      : "Find matched buyers",
+                },
+                {
+                  id: "buy",
+                  icon: Building2,
+                  sticker: language === "ar" ? "شراء" : "BUY",
+                  title: language === "ar" ? "أريد أن أشتري" : "I want to buy",
+                  body:
+                    language === "ar"
+                      ? "اعثر على موردين وفرص"
+                      : "Find suppliers and opportunities",
+                },
+              ]}
+              onClose={onDirectionPickerClose}
+              onChoose={(id) => onDirectionSelect(id as DealIntent)}
+            />
+          ) : null}
         </div>
       </div>
     </section>
   );
 }
 
-function LiveLeadStream({ job, leads, language }: { job: LeadJob | null; leads: Lead[]; language: "ar" | "en" }) {
+function searchActivity(
+  job: LeadJob | null,
+  language: "ar" | "en",
+): { state: OrbState; label: string; detail: string; running: boolean } {
+  const ar = language === "ar";
+  const stats = job?.b2cCampaign?.stats;
+  const status = (job?.b2cCampaign?.status || job?.status || "").toLowerCase();
+  const delivered = Number(job?.result_count || 0);
+  const target = Number(job?.target_count || 0);
+  const stopped = ["failed", "error", "cancelled", "partial"].includes(status);
+  const complete = ["completed", "sourced"].includes(status);
+  const event = stats?.executionLedger?.at(-1)?.code || "";
+  const phase = String(stats?.activeStrategyPhase || "");
+  if (stopped || complete)
+    return {
+      state: "breathing",
+      running: false,
+      label: ar
+        ? status === 'partial' ? 'نتائج جزئية' : complete
+          ? "اكتمل البحث"
+          : "توقف البحث"
+        : status === 'partial' ? 'Partial results' : complete
+          ? "Search complete"
+          : "Search stopped",
+      detail: ar
+        ? `تمت إضافة ${delivered} من أصل ${target} عميلاً. النتائج المحفوظة متاحة هنا.`
+        : job?.error_message || `${delivered} of ${target} leads saved. Your results remain available here.`,
+    };
+  if (job?.provider === 'apify') return {
+    state: 'searching', running: true,
+    label: ar ? 'نبحث عبر المصادر المناسبة' : 'Searching compatible sources',
+    detail: ar ? `تم حفظ ${delivered} من ${target}. نراجع نتائج إضافية ونستبعد التكرار ضمن ميزانية البحث.` : `${delivered} of ${target} saved. Reviewing more sources and removing duplicates within the search budget.`,
+  };
+  if (stats?.mahally && !stats.mahally.complete) return {
+    state: 'searching', running: true,
+    label: ar ? 'نبحث عن المتاجر في محلي' : 'Finding stores on Mahally',
+    detail: ar
+      ? `تم فحص ${stats.mahally.checked || 0} متجر. نراجع موقع المتجر وأرقام التواصل المتاحة، ثم نحفظ النتائج الفريدة.`
+      : `${stats.mahally.checked || 0} stores checked. Reviewing merchant websites and available contact numbers, then saving distinct results.`,
+  };
+  if (!stats?.postsFetched)
+    return {
+      state: "breathing",
+      running: true,
+      label: ar ? "نجهّز بحثك" : "Preparing your search",
+      detail: ar
+        ? "نحوّل وصفك إلى عبارات بحث محلية تناسب العميل المطلوب."
+        : "Turning your brief into local search terms that fit your audience.",
+    };
+  if (event === "PAGE_FETCHED")
+    return {
+      state: "working",
+      running: true,
+      label: ar ? "نفحص أرقام التواصل" : "Checking available phone numbers",
+      detail: ar
+        ? "نفحص بيانات التواصل المنشورة قبل مراجعة ملاءمة كل إعلان."
+        : "Checking published contact details before reviewing each listing’s relevance.",
+    };
+  if (event === "PHONE_PREFLIGHT_COMPLETED")
+    return {
+      state: "solving",
+      running: true,
+      label: ar ? "نراجع مدى الملاءمة" : "Reviewing potential matches",
+      detail: ar
+        ? "نقارن الإعلانات بطلبك ونستبعد النتائج غير المناسبة."
+        : "Comparing reachable advertisers with your brief and filtering unrelated results.",
+    };
+  if (event === "LEAD_DELIVERED" || event === "CONTACT_BATCH_COMPLETED")
+    return {
+      state: "working",
+      running: true,
+      label: ar ? "ننظّم النتائج" : "Organizing your results",
+      detail: ar
+        ? "نزيل التكرار ونضيف العملاء المناسبين مع أرقام التواصل المتاحة."
+        : "Removing duplicates and saving relevant contacts with available phone numbers.",
+    };
+  return {
+    state: "searching",
+    running: true,
+    label: ar
+      ? phase.includes("fallback") || phase.includes("recovery")
+        ? "نوسّع نطاق البحث"
+        : "نبحث في الإعلانات العامة"
+      : phase.includes("fallback") || phase.includes("recovery")
+        ? "Broadening the search"
+        : "Searching public listings",
+    detail: ar
+      ? "نراجع نتائج جديدة للعثور على أشخاص يناسبون طلبك، بما في ذلك إشارات الاهتمام والملكية."
+      : "Exploring fresh listings for people who fit your brief, including buying-interest and ownership signals.",
+  };
+}
+
+function ChatSearchActivity({
+  job,
+  language,
+  showSocialLookup,
+}: {
+  job: LeadJob | null;
+  language: "ar" | "en";
+  showSocialLookup: boolean;
+}) {
+  const activity = searchActivity(job, language);
+  return (
+    <div className="ops-chat-search-activity" role="status">
+      <span
+        className={
+          activity.running
+            ? "ops-chat-search-activity__orb"
+            : "ops-chat-search-activity__orb is-stopped"
+        }
+      >
+        <ThinkingOrb
+          state={activity.state}
+          paused={!activity.running}
+          size={64}
+          theme="dark"
+          aria-label={activity.label}
+        />
+      </span>
+      <div>
+        <strong>{activity.label}</strong>
+        <p>{activity.detail}</p>
+        <small>
+          {language === "ar" ? "العملاء المحفوظون" : "Leads saved"} ·{" "}
+          {Number(job?.result_count || 0)} / {Number(job?.target_count || 0)}
+        </small>
+      </div>
+      {activity.running && showSocialLookup ? (
+        <SocialNetworkScan language={language} />
+      ) : null}
+    </div>
+  );
+}
+
+function LiveLeadStream({
+  job,
+  leads,
+  language,
+}: {
+  job: LeadJob | null;
+  leads: Lead[];
+  language: "ar" | "en";
+}) {
+  const [stopping, setStopping] = useState(false);
+  const [stoppedId, setStoppedId] = useState<string | null>(null);
+  const stoppedLocally = Boolean(job && stoppedId === job.id);
+  const stopRun = async () => {
+    const campaignId = job?.b2cCampaign?.id || job?.provider_job_id;
+    if (!job || !campaignId || stopping) return;
+    setStopping(true);
+    try {
+      await stopB2CCampaign(campaignId);
+      setStoppedId(job.id);
+      notify.success(
+        language === "ar"
+          ? "تم إيقاف البحث. العملاء المحفوظون ما زالوا متاحين."
+          : "Search stopped. Your saved leads are kept.",
+      );
+    } catch (error) {
+      notify.danger(apiErrorMessage(error));
+    } finally {
+      setStopping(false);
+    }
+  };
   const delivered = Math.max(0, Number(job?.result_count || leads.length));
   const target = Math.max(delivered, Number(job?.target_count || 0));
-  const running = !job || !["completed", "failed", "error", "cancelled"].includes(job.status.toLowerCase());
+  const running = !stoppedLocally && searchActivity(job, language).running;
   const stats = job?.b2cCampaign?.stats;
-  const scanned = Number(stats?.postsFetched || 0);
-  const qualified = Number(stats?.candidatesQualified || 0);
-  const verified = Number(stats?.contactsResolved || 0);
+  // Use the same raw fetched-listing counter that the backend ceiling enforces.
+  // postsFetched is deduplicated and made the admin limit look inconsistent.
+  const companySearch = job?.provider === 'apify';
+  const scanned = companySearch ? job.sourceProgress?.rawRecords ?? null : Number(stats?.listingsFetchedTotal ?? stats?.postsFetched ?? 0);
+  const qualified = companySearch ? job.sourceProgress?.potentialMatches ?? null : Number(stats?.candidatesQualified || 0);
+  const verified = companySearch ? job.sourceProgress?.phoneRecords ?? null : Number(stats?.contactsResolved || 0);
   const [visibleCount, setVisibleCount] = useState(0);
   useEffect(() => {
+    if (!running) {
+      setVisibleCount(leads.length);
+      return;
+    }
     if (!leads.length) {
       setVisibleCount(0);
       return;
     }
     if (visibleCount >= leads.length) return;
-    const timer = window.setTimeout(() => setVisibleCount((current) => Math.min(leads.length, current + 1)), 360);
+    const timer = window.setTimeout(
+      () => setVisibleCount((current) => Math.min(leads.length, current + 1)),
+      360,
+    );
     return () => window.clearTimeout(timer);
-  }, [leads.length, visibleCount]);
-  const visibleLeads = leads.slice(0, Math.min(6, visibleCount));
-  const skeletons = running ? Math.min(4, Math.max(1, Math.min(target - visibleLeads.length, 4))) : 0;
-  const activity: { state: OrbState; label: string } = scanned === 0
-    ? { state: "breathing", label: language === "ar" ? "نبني أفضل مسارات البحث" : "Building the strongest search paths" }
-    : qualified === 0
-      ? { state: "searching", label: language === "ar" ? "نفحص إشارات الطلب الحية" : "Scanning live demand signals" }
-      : verified === 0
-        ? { state: "solving", label: language === "ar" ? "نراجع الملاءمة والاستبعادات" : "Checking fit and exclusions" }
-        : { state: "working", label: language === "ar" ? "نتحقق ونضيف العملاء واحداً تلو الآخر" : "Verifying and delivering leads one by one" };
+  }, [leads.length, visibleCount, running]);
+  const visibleLeads = leads.slice(0, visibleCount);
+  const skeletons = running
+    ? Math.min(4, Math.max(1, Math.min(target - visibleLeads.length, 4)))
+    : 0;
+  const activity = searchActivity(
+    stoppedLocally && job
+      ? { ...job, status: "cancelled", b2cCampaign: null }
+      : job,
+    language,
+  );
   const steps = [
-    { label: language === "ar" ? "فهم نية الشراء" : "Mapped buyer intent", done: scanned > 0 },
-    { label: language === "ar" ? "فحص إشارات الطلب" : "Scanned demand signals", done: qualified > 0, value: scanned },
-    { label: language === "ar" ? "تأكيد الملاءمة" : "Confirmed relevance", done: verified > 0, value: qualified },
-    { label: language === "ar" ? "التحقق من التواصل" : "Verified contact details", done: delivered > 0, value: verified },
+    {
+      label: companySearch ? language === 'ar' ? 'سجلات تم فحصها' : 'Records reviewed' : language === "ar" ? "إعلانات تم فحصها" : "Listings explored",
+      value: scanned,
+    },
+    {
+      label:
+        companySearch ? language === 'ar' ? 'سجلات بأرقام تواصل' : 'Records with phones' : language === "ar" ? "أرقام تواصل متاحة" : "Available phone numbers",
+      value: verified,
+    },
+    {
+      label: language === "ar" ? "مطابقات محتملة" : "Potential matches",
+      value: qualified,
+    },
+    {
+      label: language === "ar" ? "عملاء فريدون محفوظون" : "Unique leads saved",
+      value: delivered,
+    },
   ];
   return (
     <aside className="ops-live-leads" aria-live="polite">
       <header>
         <div>
-          <span className="ops-live-leads__orb"><ThinkingOrb state={activity.state} size={64} theme="dark" aria-label={activity.label} /></span>
-          <span><strong>{language === "ar" ? "العملاء يصلون الآن" : "Leads arriving now"}</strong><small>{activity.label}</small></span>
+          <span className="ops-live-leads__orb">
+            <ThinkingOrb
+              state={activity.state}
+              paused={!activity.running}
+              size={64}
+              theme="dark"
+              aria-label={activity.label}
+            />
+          </span>
+          <span>
+            <strong>
+              {language === "ar" ? "نتائج بحثك" : "Your search results"}
+            </strong>
+            <small>{activity.label}</small>
+          </span>
         </div>
-        <span>{delivered} / {target}</span>
+        <span>
+          {delivered} / {target}
+        </span>
+        {running && job?.provider === "b2c" && (
+          <UiButton
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={stopRun}
+            disabled={stopping}
+            aria-label={
+              language === "ar" ? "إيقاف توليد العملاء" : "Stop lead generation"
+            }
+          >
+            <span aria-hidden="true">■</span>{" "}
+            {stopping
+              ? language === "ar"
+                ? "جارٍ الإيقاف…"
+                : "Stopping…"
+              : language === "ar"
+                ? "إيقاف"
+                : "Stop"}
+          </UiButton>
+        )}
       </header>
-      <div className="ops-live-leads__progress" aria-hidden="true"><i style={{ width: `${target ? Math.min(100, (delivered / target) * 100) : 0}%` }} /></div>
+      <div className="ops-live-leads__progress" aria-hidden="true">
+        <i
+          style={{
+            width: `${target ? Math.min(100, (delivered / target) * 100) : 0}%`,
+          }}
+        />
+      </div>
       <ol className="ops-live-leads__trace">
         {steps.map((step, index) => (
-          <li className={step.done ? "is-done" : index === steps.findIndex((item) => !item.done) ? "is-active" : ""} key={step.label}>
-            <i>{step.done ? "✓" : index + 1}</i><span>{step.label}</span>{step.value ? <b>{step.value.toLocaleString()}</b> : null}
+          <li key={step.label}>
+            <i>{index + 1}</i>
+            <span>{step.label}</span>
+            <b>{step.value === null ? '—' : step.value.toLocaleString()}</b>
           </li>
         ))}
       </ol>
       <div className="ops-live-leads__list">
         {visibleLeads.map((lead) => (
           <article className="ops-live-lead" key={lead.id}>
-            <span className="ops-live-lead__avatar">{(lead.name || lead.company || "L").slice(0, 1).toUpperCase()}</span>
-            <div><strong>{lead.name || lead.company}</strong><small>{lead.location || (language === "ar" ? "السعودية" : "Saudi Arabia")}</small></div>
-            <span className="ops-live-lead__contact">{lead.phone || (language === "ar" ? "تم التحقق" : "Verified")}</span>
+            <span className="ops-live-lead__avatar">
+              {(lead.name || lead.company || "L").slice(0, 1).toUpperCase()}
+            </span>
+            <div>
+              <strong>{lead.name || lead.company}</strong>
+              <small>
+                {lead.location ||
+                  (language === "ar" ? "السعودية" : "Saudi Arabia")}
+              </small>
+            </div>
+            <span className="ops-live-lead__contact">
+              {lead.phone || (language === "ar" ? "تم التحقق" : "Verified")}
+            </span>
           </article>
         ))}
         {Array.from({ length: skeletons }, (_, index) => (
-          <div className="ops-live-lead is-skeleton" key={`lead-skeleton-${index}`} aria-hidden="true">
+          <div
+            className="ops-live-lead is-skeleton"
+            key={`lead-skeleton-${index}`}
+            aria-hidden="true"
+          >
             <span className="ops-live-lead__avatar" />
-            <div><i /><i /></div>
+            <div>
+              <i />
+              <i />
+            </div>
             <i />
           </div>
         ))}
       </div>
-      {running ? <p>{language === "ar" ? "نراجع الدليل ومعلومات التواصل قبل إضافة كل عميل." : "Evidence and contact details are checked before each lead appears."}</p> : null}
+      {running ? (
+        <p>
+          {language === "ar"
+            ? "نراجع الدليل ومعلومات التواصل قبل إضافة كل عميل."
+            : "Evidence and contact details are checked before each lead appears."}
+        </p>
+      ) : null}
     </aside>
   );
 }
@@ -3161,45 +3926,169 @@ function ResearchActivity({
   mode: ChatActivityMode;
   phase: number;
 }) {
+  const [startedAt] = useState(Date.now);
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => setElapsed((Date.now() - startedAt) / 1000), 100);
+    return () => window.clearInterval(timer);
+  }, [startedAt]);
   const activity: { state: OrbState; label: string } =
     mode === "sourcing"
       ? {
           state: "working",
           label: language === "ar" ? "جارٍ العمل…" : "Working…",
         }
-      : phase === 0
-        ? {
+      : {
             state: "working",
             label: language === "ar" ? "جارٍ التفكير…" : "Thinking…",
-          }
-        : phase === 1 && mode === "thinking"
-          ? {
-              state: "searching",
-              label: language === "ar" ? "جارٍ البحث…" : "Searching…",
-            }
-          : {
-              state: "solving",
-              label: language === "ar" ? "جارٍ الحل…" : "Solving…",
-            };
+          };
   return (
-    <div className="ops-chat-message is-assistant is-research">
-      <div className="research-activity is-orb-status rounded-full">
-        <span className="research-activity__orb ">
-          <ThinkingOrb
-            state={activity.state}
-            size={64}
-            theme="dark"
-            aria-label={activity.label}
-          />
-        </span>
+    <div className="ops-chat-message is-assistant is-research" data-phase={phase}>
+      <div className="chat-tool-status">
+        <BrainCircuit size={18} aria-hidden="true" />
         <strong>{activity.label}</strong>
+        <span className="chat-response-time" aria-live="off" dir="ltr">{elapsed.toFixed(1)}s</span>
       </div>
-      <div className="research-activity__steps" role="status" aria-live="polite">
-        <p>{mode === "sourcing"
-          ? language === "ar" ? "أجهّز البحث وفق طلبك. ستظهر النتائج هنا بعد مراجعة ملاءمتها وبيانات التواصل." : "Preparing your search from your brief. Matches will appear here after relevance and contact checks."
-          : language === "ar" ? "أراجع عرضك والجمهور والموقع لأحدد الخطوة التالية. عندما يصبح الطلب جاهزاً، ستختار عدد العملاء هنا." : "Reviewing your offer, audience, and location to determine the next step. Once your brief is ready, you’ll choose your lead count here."}</p>
-        <small>{mode === "sourcing" ? language === "ar" ? "التالي: البحث عن المرشحين ← مراجعة الملاءمة ← التحقق من التواصل" : "Next: find candidates → review relevance → verify contact details" : language === "ar" ? "التالي: توضيح التفاصيل أو تجهيز خيارات العدد" : "Next: clarify any missing details or prepare your quantity choices"}</small>
-      </div>
+      {mode === 'sourcing' && <div
+        className="research-activity__steps"
+        role="status"
+        aria-live="polite"
+      >
+        <p>
+          {mode === "sourcing"
+            ? language === "ar"
+              ? "أجهّز البحث وفق طلبك. ستظهر النتائج هنا بعد مراجعة ملاءمتها وبيانات التواصل."
+              : "Preparing your search from your brief. Matches will appear here after relevance and contact checks."
+            : language === "ar"
+              ? "أراجع عرضك والجمهور والموقع لأحدد الخطوة التالية. عندما يصبح الطلب جاهزاً، ستختار عدد العملاء هنا."
+              : "Reviewing your offer, audience, and location to determine the next step. Once your brief is ready, you’ll choose your lead count here."}
+        </p>
+        <small>
+          {mode === "sourcing"
+            ? language === "ar"
+              ? "التالي: البحث عن المرشحين ← مراجعة الملاءمة ← التحقق من التواصل"
+              : "Next: find candidates → review relevance → verify contact details"
+            : language === "ar"
+              ? "التالي: توضيح التفاصيل أو تجهيز خيارات العدد"
+              : "Next: clarify any missing details or prepare your quantity choices"}
+        </small>
+      </div>}
+    </div>
+  );
+}
+
+const SOCIAL_NETWORKS = [
+  { id: "instagram", name: "Instagram", color: "#ff4f9a" },
+  { id: "facebook", name: "Facebook", color: "#5796ff" },
+  { id: "x", name: "X", color: "#f5f5f5" },
+  { id: "tiktok", name: "TikTok", color: "#4de8e8" },
+  { id: "snapchat", name: "Snapchat", color: "#fff45c" },
+  { id: "youtube", name: "YouTube", color: "#ff5b5b" },
+  { id: "linkedin", name: "LinkedIn", color: "#69a9ff" },
+  { id: "reddit", name: "Reddit", color: "#ff784b" },
+  { id: "telegram", name: "Telegram", color: "#59b9f4" },
+  { id: "whatsapp", name: "WhatsApp", color: "#a1a1aa" },
+  { id: "pinterest", name: "Pinterest", color: "#f45d6f" },
+  { id: "twitch", name: "Twitch", color: "#aa82ff" },
+  { id: "discord", name: "Discord", color: "#8795ff" },
+  { id: "threads", name: "Threads", color: "#f5f5f5" },
+] as const;
+
+type SocialNetworkId = (typeof SOCIAL_NETWORKS)[number]["id"];
+
+function SocialNetworkMark({ id }: { id: SocialNetworkId }) {
+  const common = { size: 19, strokeWidth: 2.15 };
+  switch (id) {
+    case "instagram":
+      return <Instagram {...common} />;
+    case "facebook":
+      return <Facebook {...common} />;
+    case "x":
+      return <strong className="social-network-scan__x">𝕏</strong>;
+    case "tiktok":
+      return <Music2 {...common} />;
+    case "snapchat":
+      return <Ghost {...common} />;
+    case "youtube":
+      return <Youtube {...common} />;
+    case "linkedin":
+      return <Linkedin {...common} />;
+    case "reddit":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M7.1 11.1c1.3-.8 3-1.3 4.9-1.3s3.6.5 4.9 1.3a2.2 2.2 0 1 1 1.5 3.8c-.3 3-3 5.2-6.4 5.2S5.9 18 5.6 15a2.2 2.2 0 1 1 1.5-3.9Z" />
+          <circle cx="9.2" cy="14.4" r="1" />
+          <circle cx="14.8" cy="14.4" r="1" />
+          <path d="M9.1 17c1.7 1.1 4.1 1.1 5.8 0M12.8 9.9l1-4 3.1.7" />
+          <circle cx="17.5" cy="6.8" r="1.4" />
+        </svg>
+      );
+    case "telegram":
+      return <Send {...common} />;
+    case "whatsapp":
+      return <MessageCircle {...common} />;
+    case "pinterest":
+      return <Pin {...common} />;
+    case "twitch":
+      return <Twitch {...common} />;
+    case "discord":
+      return <Gamepad2 {...common} />;
+    case "threads":
+      return <AtSign {...common} />;
+  }
+}
+
+function SocialNetworkScan({ language }: { language: "ar" | "en" }) {
+  const [networkIndex, setNetworkIndex] = useState(
+    () => Math.floor(Math.random() * SOCIAL_NETWORKS.length),
+  );
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNetworkIndex((current) => {
+        if (SOCIAL_NETWORKS.length < 2) return current;
+        const offset = 1 + Math.floor(Math.random() * (SOCIAL_NETWORKS.length - 1));
+        return (current + offset) % SOCIAL_NETWORKS.length;
+      });
+    }, 850);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const network = SOCIAL_NETWORKS[networkIndex];
+  return (
+    <div className="social-network-lookup" aria-live="polite">
+      <span
+        className="social-network-scan"
+        style={{ color: network.color }}
+        title={network.name}
+        role="img"
+        aria-label={
+          language === "ar"
+            ? `تحليل أنماط الجمهور على ${network.name}`
+            : `Analyzing ${network.name} audience patterns`
+        }
+      >
+        <span className="social-network-scan__ring" aria-hidden="true" />
+        <span
+          className="social-network-scan__mark"
+          key={network.id}
+          aria-hidden="true"
+        >
+          <SocialNetworkMark id={network.id} />
+        </span>
+      </span>
+      <span className="social-network-lookup__copy" key={`copy-${network.id}`}>
+        <strong>
+          {language === "ar"
+            ? `نرسم خريطة الطلب حول ${network.name}`
+            : `Mapping demand around ${network.name}`}
+        </strong>
+        <small>
+          {language === "ar"
+            ? "نقارن وصفك بأنماط الجمهور وإشارات السوق العامة لنقدّم لك فرصاً أوضح وأسهل في التواصل."
+            : "Comparing your brief with audience patterns and public-market signals to surface clearer, reachable opportunities."}
+        </small>
+      </span>
     </div>
   );
 }
@@ -3406,38 +4295,6 @@ function InsightDashboard({
   );
 }
 
-function useLiquidMetalShader() {
-  const shaderRef = useRef<HTMLSpanElement>(null);
-
-  useEffect(() => {
-    if (!shaderRef.current) return;
-
-    const shader = new ShaderMount(
-      shaderRef.current,
-      liquidMetalFragmentShader,
-      {
-        u_repetition: 1.5,
-        u_softness: 0.5,
-        u_shiftRed: 0.3,
-        u_shiftBlue: 0.3,
-        u_distortion: 0,
-        u_contour: 0,
-        u_angle: 100,
-        u_scale: 1.5,
-        u_shape: 1,
-        u_offsetX: 0.1,
-        u_offsetY: -0.1,
-      },
-      undefined,
-      0.6,
-    );
-
-    return () => shader.dispose();
-  }, []);
-
-  return shaderRef;
-}
-
 function LiquidMetalSubmitButton({
   label,
   onClick,
@@ -3455,7 +4312,7 @@ function LiquidMetalSubmitButton({
     <button
       className="liquid-metal-submit"
       type="button"
-      onClick={onClick}
+      onClick={() => onClick()}
       disabled={disabled}
       aria-label={label}
     >
@@ -3472,74 +4329,168 @@ function LiquidMetalSubmitButton({
   );
 }
 
-function MetallicChoiceCard({
-  icon: Icon,
-  title,
-  body,
-  onClick,
+function LiquidMetalChoiceButton({
+  choice,
+  onChoose,
+  language,
 }: {
-  icon: React.ComponentType<{ size?: number }>;
-  title: string;
-  body: string;
-  onClick: () => void;
+  choice: { id: string; sticker?: string; title: string; body: string; disabled?: boolean };
+  onChoose: (id: string) => void;
+  language: "ar" | "en";
 }) {
-  const shaderRef = useLiquidMetalShader();
   return (
-    <button className="metallic-choice-card" type="button" onClick={onClick}>
-      <span
-        className="metallic-choice-card__shader"
-        ref={shaderRef}
-        aria-hidden="true"
-      />
-      <span className="metallic-choice-card__veil" aria-hidden="true" />
-      <span className="metallic-choice-card__content">
-        <i>
-          <Icon size={25} />
-        </i>
-        <strong>{title}</strong>
-        <small>{body}</small>
+    <button
+      type="button"
+      className={`lead-setup-choice${choice.disabled ? " is-locked" : ""}`}
+      disabled={choice.disabled}
+      onClick={() => onChoose(choice.id)}
+    >
+      <LiquidMetalEdge className="lead-setup-choice__metal" />
+      <span className="lead-setup-choice__core" aria-hidden="true" />
+      <span className="lead-setup-choice__copy">
+        <UiBadge
+          variant="outline"
+          className={`lead-setup-choice__sticker is-${choice.id}`}
+        >
+          {choice.sticker ?? choice.id.toUpperCase()}
+        </UiBadge>
+        <strong>{choice.title}</strong>
+        <small>{choice.body}</small>
       </span>
+      {choice.disabled ? <Lock className="lead-setup-choice__arrow" /> : language === "ar" ? (
+        <ArrowLeft className="lead-setup-choice__arrow" />
+      ) : (
+        <ArrowRight className="lead-setup-choice__arrow" />
+      )}
     </button>
   );
 }
 
+function ModelLaunchDialog({
+  language,
+  onClose,
+  onChoose,
+}: {
+  language: "ar" | "en";
+  onClose: () => void;
+  onChoose: (model: "b2c" | "b2b") => void;
+}) {
+  const ar = language === "ar";
+  return createPortal(
+    <div className="model-launch-overlay" role="presentation">
+      <section
+        className="model-launch-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="model-launch-title"
+        dir={ar ? "rtl" : "ltr"}
+      >
+        <LiquidMetalEdge className="model-launch-dialog__edge" />
+        <div className="model-launch-dialog__hero">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={ar ? "إغلاق" : "Close"}
+          >
+            <X />
+          </button>
+        </div>
+        <div className="model-launch-dialog__body">
+          <span>{ar ? "نموذج جديد" : "New model"}</span>
+          <h2 id="model-launch-title">
+            {ar ? "نقدم لك Wasla Astraeus" : "Introducing Wasla Astraeus"}
+          </h2>
+          <p>
+            {ar
+              ? "اكتشف الشركات وصناع القرار وإشارات السوق بعمق أكبر مع أقوى نموذج أعمال من وصلة."
+              : "Get deeper company insights, decision-makers, and market intelligence with our most advanced business model yet."}
+          </p>
+          <div>
+            <button
+              type="button"
+              className="model-launch-dialog__secondary"
+              onClick={() => onChoose("b2c")}
+            >
+              {ar ? "المتابعة باستخدام Wasla Lite" : "Continue with Wasla Lite"}
+            </button>
+            <button
+              type="button"
+              className="model-launch-dialog__primary"
+              onClick={() => onChoose("b2b")}
+            >
+              <LiquidMetalEdge className="model-launch-dialog__button-edge" />
+              <span>
+                {ar ? "جرّب Wasla Astraeus الآن" : "Try Wasla Astraeus now"}
+                {ar ? <ArrowLeft /> : <ArrowRight />}
+              </span>
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>,
+    document.getElementById("wasla-modal-root") ?? document.body,
+  );
+}
+
 function LeadSetupModal({
+  language,
   title,
   description,
   choices,
   onChoose,
+  onClose,
 }: {
+  language: "ar" | "en";
   title: string;
   description: string;
   choices: Array<{
     id: string;
     icon: React.ComponentType<{ size?: number }>;
+    sticker?: string;
     title: string;
     body: string;
+    disabled?: boolean;
   }>;
   onChoose: (id: string) => void;
+  onClose: () => void;
 }) {
   return createPortal(
-    <div className="lead-setup-overlay" role="presentation">
+    <div
+      className="lead-setup-overlay"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
       <section
         className="lead-setup-window"
         role="dialog"
         aria-modal="true"
         aria-labelledby="lead-setup-title"
+        dir={language === "ar" ? "rtl" : "ltr"}
       >
+        <UiButton
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="lead-setup-window__close"
+          aria-label="Close"
+          onClick={onClose}
+        >
+          <X />
+        </UiButton>
         <span className="lead-setup-window__eyebrow">
-          <Sparkles size={14} /> Wasla AI
+          <span /> Wasla AI
         </span>
         <h2 id="lead-setup-title">{title}</h2>
         <p>{description}</p>
         <div className={`lead-setup-cards is-${choices.length}`}>
           {choices.map((choice) => (
-            <MetallicChoiceCard
+            <LiquidMetalChoiceButton
               key={choice.id}
-              icon={choice.icon}
-              title={choice.title}
-              body={choice.body}
-              onClick={() => onChoose(choice.id)}
+              choice={choice}
+              onChoose={onChoose}
+              language={language}
             />
           ))}
         </div>
@@ -3788,14 +4739,17 @@ function WaslaNavCapsule({
               <button
                 key={key}
                 type="button"
+                disabled={consoleSectionLocked(key, user?.isAdmin)}
+                className={consoleSectionLocked(key, user?.isAdmin) ? "is-locked" : undefined}
+                aria-label={consoleSectionLocked(key, user?.isAdmin) ? `${label} — ${language === "ar" ? "قريباً" : "Coming soon"}` : label}
                 onClick={() => {
                   onNavigate?.(key);
                   setOpen(false);
                 }}
               >
                 <Icon size={17} />
-                <span>{label}</span>
-                {language === "ar" ? (
+                <span>{label}{consoleSectionLocked(key, user?.isAdmin) && <small>{language === "ar" ? "قريباً" : "Coming soon"}</small>}</span>
+                {consoleSectionLocked(key, user?.isAdmin) ? <Lock size={15} /> : language === "ar" ? (
                   <ArrowLeft size={15} />
                 ) : (
                   <ArrowRight size={15} />
@@ -3865,10 +4819,18 @@ function WaslaNavCapsule({
           </span>
         </footer>
         <div className="wasla-nav-capsule__mobile-actions">
-          <span>{language === "ar" ? "لغة الواجهة" : "Interface language"}</span>
+          <span>
+            {language === "ar" ? "لغة الواجهة" : "Interface language"}
+          </span>
           <LanguageToggle inverse />
           {!user ? (
-            <button type="button" onClick={() => { setOpen(false); onAuthOpen("login"); }}>
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onAuthOpen("login");
+              }}
+            >
               {language === "ar" ? "تسجيل الدخول" : "Log in"}
             </button>
           ) : null}
@@ -3885,7 +4847,7 @@ function LandingChat({
 }: {
   user: AuthUser | null;
   onLeadAsk: (ask: string) => void;
-  onAuthOpen: (mode?: "signup" | "login") => void;
+  onAuthOpen: (mode?: "signup" | "login", plan?: "launch" | "scale" | "autopilot" | null) => void;
 }) {
   const { direction, language, t } = useLanguage();
   const [input, setInput] = useState("");
@@ -3944,7 +4906,7 @@ function LandingChat({
     const ask = text.trim();
     if (!ask) return;
     onLeadAsk(ask);
-    if (user?.verifiedPhone) navigate("/console/agent");
+    if (user) navigate(user.subscriptionStatus === "active" || user.isAdmin ? "/console/agent" : "/console");
     else onAuthOpen();
   }
 
@@ -3965,6 +4927,7 @@ function LandingChat({
       ? [
           {
             name: "Launch",
+            bonusSar: 200,
             price: "2,999",
             leads: "3K",
             research: "1.5K",
@@ -3977,6 +4940,7 @@ function LandingChat({
           },
           {
             name: "Scale",
+            bonusSar: 300,
             price: "3,999",
             leads: "6K",
             research: "3K",
@@ -3989,6 +4953,7 @@ function LandingChat({
           },
           {
             name: "Autopilot",
+            bonusSar: 500,
             price: "حسب الطلب",
             leads: "10K",
             research: "6K",
@@ -4003,6 +4968,7 @@ function LandingChat({
       : [
           {
             name: "Launch",
+            bonusSar: 200,
             price: "2,999",
             leads: "3K",
             research: "1.5K",
@@ -4015,6 +4981,7 @@ function LandingChat({
           },
           {
             name: "Scale",
+            bonusSar: 300,
             price: "3,999",
             leads: "6K",
             research: "3K",
@@ -4027,6 +4994,7 @@ function LandingChat({
           },
           {
             name: "Autopilot",
+            bonusSar: 500,
             price: "Custom",
             leads: "10K",
             research: "6K",
@@ -4048,7 +5016,7 @@ function LandingChat({
           ],
           [
             "عبدالله الحربي",
-            "مدير مبيعات B2B",
+            "مدير مبيعات",
             "البحث العميق اختصر ساعات من التجهيز قبل المكالمات، والفريق صار يعرف من يتصل ولماذا.",
           ],
           [
@@ -4095,7 +5063,7 @@ function LandingChat({
           ],
           [
             "Abdullah Alharbi",
-            "B2B Sales Manager",
+            "Sales Manager",
             "Deep research cut hours of call prep, and the team finally knew who to call and why.",
           ],
           [
@@ -4218,7 +5186,7 @@ function LandingChat({
           poster=""
           preload="metadata"
         >
-          <source src="/Video.mp4" type="video/mp4" />
+          <source src="/hero.mp4" type="video/mp4" />
         </video>
 
         <div className="wasla-command__status">
@@ -4254,35 +5222,44 @@ function LandingChat({
             </div>
           )}
 
-          <BorderBeam className="wasla-command__beam" size="md" colorVariant="colorful" strength={0.7} theme="dark" borderRadius={999}>
-          <div className="wasla-command__input">
-            <input
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={(event) => event.key === "Enter" && submitAsk()}
-              placeholder={t("landing.placeholder")}
-              aria-label={
-                language === "ar"
-                  ? "اكتب نوع العملاء المطلوب"
-                  : "Describe the leads you need"
-              }
-            />
+          <BorderBeam
+            className="wasla-command__beam"
+            size="md"
+            colorVariant="colorful"
+            strength={0.7}
+            theme="dark"
+            borderRadius={999}
+          >
+            <div className="wasla-command__input">
+              <input
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                onKeyDown={(event) => event.key === "Enter" && submitAsk()}
+                placeholder={t("landing.placeholder")}
+                aria-label={
+                  language === "ar"
+                    ? "اكتب نوع العملاء المطلوب"
+                    : "Describe the leads you need"
+                }
+              />
 
-            <span className="wasla-command__sparkles" aria-hidden="true">
-              <Sparkles size={24} />
-            </span>
+              <span className="wasla-command__sparkles" aria-hidden="true">
+                <Sparkles size={24} />
+              </span>
 
-            <LiquidMetalSubmitButton
-              onClick={() => submitAsk(input || examples[exampleIndex].request)}
-              label={language === "ar" ? "ابدأ البحث" : "Start search"}
-            >
-              {language === "ar" ? (
-                <ArrowUpLeft size={39} />
-              ) : (
-                <ArrowUpRight size={39} />
-              )}
-            </LiquidMetalSubmitButton>
-          </div>
+              <LiquidMetalSubmitButton
+                onClick={() =>
+                  submitAsk(input || examples[exampleIndex].request)
+                }
+                label={language === "ar" ? "ابدأ البحث" : "Start search"}
+              >
+                {language === "ar" ? (
+                  <ArrowUpLeft size={39} />
+                ) : (
+                  <ArrowUpRight size={39} />
+                )}
+              </LiquidMetalSubmitButton>
+            </div>
           </BorderBeam>
         </div>
 
@@ -4330,8 +5307,8 @@ function LandingChat({
           <h2>{language === "ar" ? "باقات وصلة" : "Pricing plans"}</h2>
           <p>
             {language === "ar"
-              ? "ابدأ بعملاء مثرين وبحث عميق، ثم ارتقِ إلى وكيل يتصل ويحجز الاجتماعات."
-              : "Start with enriched leads and deep research, then scale into an agent that calls and books meetings."}
+              ? "خدمة خاصة تُفعّل مع فريق المبيعات. تحصل على رصيد الباقة فقط بعد استلام الدفعة كاملة."
+              : "Private access, arranged with our sales team. Plan credit is added only after full payment is received."}
           </p>
         </div>
         <div className="wasla-pricing__shelf">
@@ -4354,13 +5331,14 @@ function LandingChat({
                     : `${bundle.price} SAR`}
                 </strong>
                 <p>{bundle.note}</p>
+                <p className="wasla-pricing__paid-credit">{language === "ar" ? `رصيد ${bundle.bonusSar} ر.س بعد الدفع الكامل` : `${bundle.bonusSar} SAR credit after full payment`}</p>
               </header>
               <button
                 onClick={
-                  user ? () => navigate("/console") : () => onAuthOpen("signup")
+                  user ? () => navigate("/console") : () => onAuthOpen("signup", bundle.name.toLowerCase() as "launch" | "scale" | "autopilot")
                 }
               >
-                {language === "ar" ? "ابدأ الآن" : "Get started"}{" "}
+                {language === "ar" ? "اطلب الاشتراك" : "Request subscription"}{" "}
                 {language === "ar" ? (
                   <ArrowLeft size={16} />
                 ) : (
@@ -4456,132 +5434,34 @@ function LandingChat({
 }
 
 function PaymentPage({ language }: { language: "ar" | "en" }) {
-  const [card, setCard] = useState({
-    name: "",
-    number: "",
-    expiry: "",
-    cvc: "",
-  });
   return (
     <section className="payment-page">
       <header>
         <span>
-          <CreditCard size={15} />{" "}
+          <Lock size={15} />{" "}
           {language === "ar" ? "الفوترة والرصيد" : "Billing & credits"}
         </span>
-        <h1>{language === "ar" ? "طرق الدفع" : "Payment methods"}</h1>
+        <h1>{language === "ar" ? "اشتراك خاص" : "Private subscription"}</h1>
         <p>
           {language === "ar"
-            ? "أضف بيانات بطاقتك لتكون جاهزاً عند إطلاق الدفع الإلكتروني."
-            : "Add your card details so your account is ready when online payments launch."}
+            ? "تتم الاشتراكات عبر فريق مبيعات وصلة. يُفعّل الاشتراك ويُضاف رصيد الخطة فقط بعد استلام المبلغ كاملاً وتأكيد الدفع."
+            : "Subscriptions are arranged with Wasla Sales. Your plan is activated and its credit is added only after full payment reaches our account and is confirmed."}
         </p>
       </header>
-      <div className="payment-page__grid">
-        <div className="payment-card-preview">
-          <WaslaBrand variant="symbol" inverse />
-          <span>{card.number || "•••• •••• •••• ••••"}</span>
-          <div>
-            <strong>
-              {card.name ||
-                (language === "ar" ? "اسم حامل البطاقة" : "CARDHOLDER NAME")}
-            </strong>
-            <small>{card.expiry || "MM/YY"}</small>
-          </div>
+      <div className="payment-page__private-note">
+        <Lock size={24} strokeWidth={1.5} />
+        <div>
+          <strong>{language === "ar" ? "تواصل مع فريق مبيعات وصلة" : "Speak with Wasla Sales"}</strong>
+          <p>{language === "ar"
+            ? "لا ندخل بيانات الدفع هنا. يتولى فريقنا ترتيب الاشتراك والتحقق من وصول المبلغ قبل فتح مساحة العمل."
+            : "We do not collect card details here. Our team arranges your subscription and verifies receipt of payment before opening your workspace."}</p>
         </div>
-        <Card className="hconsole-card payment-form">
-          <Card.Header>
-            <Card.Title>
-              {language === "ar" ? "إضافة بطاقة" : "Add a card"}
-            </Card.Title>
-            <Badge>
-              <Badge.Label>
-                {language === "ar" ? "قريباً" : "Coming soon"}
-              </Badge.Label>
-            </Badge>
-          </Card.Header>
-          <Card.Content>
-            <label>
-              <span>
-                {language === "ar" ? "الاسم على البطاقة" : "Name on card"}
-              </span>
-              <input
-                value={card.name}
-                onChange={(event) =>
-                  setCard({ ...card, name: event.target.value })
-                }
-              />
-            </label>
-            <label>
-              <span>{language === "ar" ? "رقم البطاقة" : "Card number"}</span>
-              <input
-                dir="ltr"
-                inputMode="numeric"
-                maxLength={19}
-                value={card.number}
-                onChange={(event) =>
-                  setCard({
-                    ...card,
-                    number: event.target.value
-                      .replace(/\D/g, "")
-                      .slice(0, 16)
-                      .replace(/(.{4})/g, "$1 ")
-                      .trim(),
-                  })
-                }
-                placeholder="4242 4242 4242 4242"
-              />
-            </label>
-            <div>
-              <label>
-                <span>{language === "ar" ? "الانتهاء" : "Expiry"}</span>
-                <input
-                  dir="ltr"
-                  value={card.expiry}
-                  onChange={(event) =>
-                    setCard({ ...card, expiry: event.target.value.slice(0, 5) })
-                  }
-                  placeholder="MM/YY"
-                />
-              </label>
-              <label>
-                <span>CVC</span>
-                <input
-                  dir="ltr"
-                  inputMode="numeric"
-                  maxLength={4}
-                  value={card.cvc}
-                  onChange={(event) =>
-                    setCard({
-                      ...card,
-                      cvc: event.target.value.replace(/\D/g, ""),
-                    })
-                  }
-                  placeholder="•••"
-                />
-              </label>
-            </div>
-          </Card.Content>
-          <Card.Footer>
-            <Button
-              onClick={() =>
-                notify.info(
-                  language === "ar"
-                    ? "حفظ البطاقات سيُتاح قريباً — لم يتم إرسال أو تخزين أي بيانات."
-                    : "Card saving is coming soon — no payment data was sent or stored.",
-                )
-              }
-            >
-              <Lock size={14} />{" "}
-              {language === "ar" ? "حفظ البطاقة" : "Save card"}
-            </Button>
-          </Card.Footer>
-        </Card>
       </div>
       <small className="payment-page__notice">
         <ShieldCheck size={14} />{" "}
         {language === "ar"
-          ? "بوابة الدفع قيد التجهيز. لن نحفظ بيانات البطاقة قبل تفعيل مزود دفع معتمد."
-          : "Payment gateway coming soon. Card data will not be stored until a certified payment provider is enabled."}
+          ? "رصيد الاشتراك: ٢٠٠ أو ٣٠٠ أو ٥٠٠ ريال حسب الخطة المدفوعة."
+          : "Paid-plan credit: SAR 200, 300, or 500, depending on the selected plan."}
       </small>
     </section>
   );

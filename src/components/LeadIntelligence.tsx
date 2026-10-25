@@ -79,7 +79,7 @@ export function ResearchedLeads({ leads, research, language, onOpen }: { leads: 
   return <section className="core-leads intelligence-library" dir={ar ? "rtl" : "ltr"}>
     <header className="core-leads__heading"><div><span className="core-eyebrow">{ar ? "معرفة تتحول إلى فرص" : "CONTEXT FOR YOUR NEXT CONVERSATION"}</span><h1>{ar ? "العملاء المبحوثون" : "Researched leads"}</h1><p>{ar ? "أبحاث محفوظة لعملائك. فتحها لا يبدأ بحثاً جديداً." : "Saved intelligence for your leads. Opening a report never starts another research run."}</p></div></header>
     <input className="intel-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={ar ? "ابحث بالاسم أو الشركة…" : "Search name or company…"} aria-label={ar ? "البحث في التقارير" : "Search reports"}/>
-    {!completed.length && <div className="core-leads__empty"><Sparkles size={26}/><h2>{ar ? "لا توجد أبحاث مكتملة بعد" : "No completed research yet"}</h2><p>{ar ? "ابدأ بحث عميل B2B من قسم العملاء. سيظهر تقريره هنا عند اكتماله." : "Research a B2B lead from Leads. Its completed report will appear here."}</p></div>}
+    {!completed.length && <div className="core-leads__empty"><Sparkles size={26}/><h2>{ar ? "لا توجد أبحاث مكتملة بعد" : "No completed research yet"}</h2><p>{ar ? "ابدأ بحث عميل Wasla-Astraeus من قسم العملاء. سيظهر تقريره هنا عند اكتماله." : "Research a Wasla-Astraeus lead from Leads. Its completed report will appear here."}</p></div>}
     <div className="intel-grid">{completed.map(({ lead, report }) => {
       const sections = reportSections(report);
       const signals = sections.filter((section) => /signal|priorit|opportunit|pain|angle|buying|إشار|فرص|أولو/i.test(section.title)).slice(0, 3);

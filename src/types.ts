@@ -1,5 +1,12 @@
 export type LeadStatus = "new" | "qualified" | "researching" | "proposal" | "contacted" | "won" | "lost";
 
+export type ListingPreview = {
+  intent: "sold_or_closed" | "seeking_work" | "seeking_to_rent" | "seeking_to_buy" | "offering_for_rent" | "offering_for_sale" | "offering_service" | "product_listed" | "not_stated";
+  product?: string | null;
+  productCategoryEn?: string | null;
+  ownership?: "likely_owner" | "unverified";
+};
+
 export type Lead = {
   id: string;
   name: string;
@@ -7,11 +14,18 @@ export type Lead = {
   company: string;
   email: string;
   phone?: string;
+  phoneNumbers?: Array<{ number: string; label: string }>;
+  contactKind?: string;
+  contactAuthorization?: { status:string; action:string; contactKinds?:string[]; nextStep?:string|null } | null;
+  contactExclusions?: Array<{reason:string; detail:string; status?:string; stage?:string; nextStep?:string}>;
   companyImageUrl?: string;
   personImageUrl?: string;
   website?: string;
   linkedinUrl?: string;
   qualificationReason?: string;
+  liteGrade?: string;
+  buyerComment?: { body: string; date: number; marketCity: string; profileCity?: string | null; sourcePostUrl?: string | null; cityBasis: string } | null;
+  listing?: ListingPreview | null;
   revealed?: boolean;
   researchStatus?: "researching" | "completed" | "failed";
   location: string;
@@ -104,6 +118,21 @@ export type IntakeState = {
   apifyInput: Record<string, unknown>;
   channel?: "b2b" | "b2c";
   originalPrompt?: string;
+  signalTopics?: string[];
+  signalPostUrls?: string[];
+  signalSource?: "signal" | "business";
+  model?: "astraeus_ultra";
+  productDescription?: string;
+  productOutcome?: string;
+  businessUnderstanding?: {
+    offer: string;
+    customer: string;
+    customerOutcome: string;
+    commercialModel: string;
+    target: string;
+    fitSignal: string;
+    geography: string;
+  };
   b2cPlanning?: B2CPlanning;
 };
 

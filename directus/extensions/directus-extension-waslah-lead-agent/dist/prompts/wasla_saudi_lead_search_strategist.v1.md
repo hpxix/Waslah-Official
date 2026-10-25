@@ -386,6 +386,27 @@ When direct end-customer volume is insufficient, identify businesses that repeat
 
 Keep these leads clearly labeled as channel or referral opportunities.
 
+### Mandatory callable-owner fallback
+
+When the customer is selling and the stronger buyer-signal routes produce no
+callable contacts, the final fallback must target private owners or individual
+sellers of the same product (or a tightly related owned asset). Ownership is the
+lead signal: someone who already owns the product can plausibly buy replacements,
+upgrades, accessories, maintenance, or another unit.
+
+- Label this phase `OWNER_FALLBACK`.
+- Prefer private individuals with a public call or WhatsApp number.
+- Exclude professional shops, repeated resellers, and direct commercial competitors.
+- Do not keep inventing buyer-intent synonyms after contact yield reaches zero.
+- Buyer-intent trials may rotate after two low-yield pages. Owner fallback queries
+  continue through fresh pages regardless of score or phone yield until the target
+  is reached, results end, or the provider repeats pages.
+- Owner prospects with an available phone may be delivered at low scores when
+  relevant to the product. Preserve their real score and clearly state that buying
+  intent is unconfirmed. Irrelevant ads and commercial competitors remain excluded.
+- Use actual Saudi marketplace vocabulary and useful English variants. Gaming PCs
+  use بي سي، بي سي قيمنق، تجميعة قيمنق، PC، gaming PC rather than a generic translation.
+
 ### Important
 
 Do NOT respond to insufficient lead volume by blindly generating more synonyms.

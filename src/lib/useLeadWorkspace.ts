@@ -9,7 +9,7 @@ const STALE_JOB_MS = 30 * 60 * 1000;
 function settledJob(job: LeadJob | null): { job: LeadJob | null; error: string } {
   if (!job) return { job: null, error: "" };
   const status = job.status.toLowerCase();
-  if (["failed", "error", "cancelled"].includes(status)) {
+  if (["failed", "error", "cancelled", "partial"].includes(status)) {
     return { job, error: job.error_message || "Lead generation failed. No credits were charged for undelivered leads." };
   }
   const updatedAt = job.updated_at ? Date.parse(job.updated_at) : NaN;

@@ -1,5 +1,6 @@
 import type { Lead } from "../types"
 import type { SheetData } from "write-excel-file/browser"
+import { fetchAuthorizedDownloadLeads } from './directus'
 
 const columns = [
   ["Name", (lead: Lead) => lead.name],
@@ -17,6 +18,8 @@ const columns = [
   ["LinkedIn", (lead: Lead) => lead.linkedinUrl],
   ["Last updated", (lead: Lead) => lead.lastSeenUpdateAt],
   ["Tags", (lead: Lead) => lead.tags.join(", ")],
+  ["Contact authorization", (lead: Lead) => lead.contactAuthorization?.status || ""],
+  ["Authorization next step", (lead: Lead) => lead.contactAuthorization?.nextStep || ""],
 ] as const
 
 function fileBaseName() {
@@ -43,7 +46,8 @@ function download(blob: Blob, fileName: string) {
   URL.revokeObjectURL(url)
 }
 
-export function exportLeadsCsv(leads: Lead[]) {
+export async function exportLeadsCsv(leads: Lead[]) {
+  leads = await fetchAuthorizedDownloadLeads(leads.map(lead => lead.id))
   const rows = [columns.map(([label]) => label), ...leads.map((lead) => columns.map(([, read]) => safeSpreadsheetText(read(lead))))]
   const csv = rows.map((row) => row.map((value) => `"${value.replaceAll('"', '""')}"`).join(",")).join("\r\n")
   download(new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" }), `${fileBaseName()}.csv`)
@@ -51,11 +55,12 @@ export function exportLeadsCsv(leads: Lead[]) {
 
 export async function exportLeadsXlsx(leads: Lead[]) {
   const { default: writeXlsxFile } = await import("write-excel-file/browser")
+  leads = await fetchAuthorizedDownloadLeads(leads.map(lead => lead.id))
   const header = columns.map(([label]) => ({ value: String(label), fontWeight: "bold" as const, backgroundColor: "E5E7EB" }))
   const rows: SheetData = [header, ...leads.map((lead) => columns.map(([, read]) => ({ value: safeSpreadsheetText(read(lead)), type: String })))]
   await writeXlsxFile(rows, {
     sheet: "Leads",
-    columns: [24, 18, 28, 26, 26, 20, 22, 14, 14, 12, 52, 30, 34, 22, 30].map((width) => ({ width })),
+    columns: [24, 18, 28, 26, 26, 20, 22, 14, 14, 12, 52, 30, 34, 22, 30, 24, 60].map((width) => ({ width })),
     stickyRowsCount: 1,
   }).toFile(`${fileBaseName()}.xlsx`)
 }

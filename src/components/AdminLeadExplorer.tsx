@@ -202,7 +202,7 @@ function LeadCard({ lead, language, onOpen, onResearch }: { lead: AdminLead; lan
         {lead.phone && <span><Phone size={12} /> {lead.phone}</span>}
         {lead.location && <span><MapPin size={12} /> {lead.location}</span>}
       </div>
-      <footer><span className={`lead-type-indicator is-${/b2c/i.test(lead.source) ? "b2c" : "b2b"}`}>{/b2c/i.test(lead.source) ? "B2C" : "B2B"}</span><button disabled={/b2c/i.test(lead.source)} onClick={(event) => { event.stopPropagation(); onResearch?.(lead); }}><Search size={13} />{language === "ar" ? "بحث" : "Research"}</button><button onClick={(event) => { event.stopPropagation(); onOpen(); }}>{language === "ar" ? "فتح" : "Open"}{language === "ar" ? <ArrowLeft size={13} /> : <ArrowRight size={13} />}</button></footer>
+      <footer><span className={`lead-type-indicator is-${/b2c/i.test(lead.source) ? "b2c" : "b2b"}`}>{/b2c/i.test(lead.source) ? "Wasla-Lite" : "Wasla-Astraeus"}</span><button disabled={/b2c/i.test(lead.source)} onClick={(event) => { event.stopPropagation(); onResearch?.(lead); }}><Search size={13} />{language === "ar" ? "بحث" : "Research"}</button><button onClick={(event) => { event.stopPropagation(); onOpen(); }}>{language === "ar" ? "فتح" : "Open"}{language === "ar" ? <ArrowLeft size={13} /> : <ArrowRight size={13} />}</button></footer>
     </article>
   );
 }
@@ -215,7 +215,7 @@ function LeadRow({ lead, language, onOpen, onResearch, table }: { lead: AdminLea
       <span className="admin-lead-row__purpose"><strong>{lead.campaign_name || (language === "ar" ? "طلب العميل" : "Lead prompt")}</strong><small>{lead.purpose || "-"}</small></span>
       <span className="admin-lead-row__contact"><strong>{lead.email || lead.phone || "-"}</strong><small>{lead.location || "-"}</small></span>
       <span className={`admin-enrichment is-${lead.enrichment_status}`}><i /> {lead.enrichment_score}%</span>
-      <span className="admin-lead-row__source"><span className={`lead-type-indicator is-${/b2c/i.test(lead.source) ? "b2c" : "b2b"}`}>{/b2c/i.test(lead.source) ? "B2C" : "B2B"}</span></span>
+      <span className="admin-lead-row__source"><span className={`lead-type-indicator is-${/b2c/i.test(lead.source) ? "b2c" : "b2b"}`}>{/b2c/i.test(lead.source) ? "Wasla-Lite" : "Wasla-Astraeus"}</span></span>
       <button className="admin-lead-row__research" disabled={/b2c/i.test(lead.source)} onClick={(event) => { event.stopPropagation(); onResearch?.(lead); }} aria-label={language === "ar" ? "بحث العميل" : "Research lead"}><Search size={14} /></button>
     </div>
   );
@@ -232,7 +232,7 @@ function LeadDetail({ lead, language, onClose }: { lead: AdminLead; language: "a
         <header><span><small>{language === "ar" ? "سجل تم تسليمه" : "Delivered lead record"}</small><strong>{language === "ar" ? "تفاصيل العميل" : "Lead details"}</strong></span><button onClick={onClose} aria-label={language === "ar" ? "إغلاق" : "Close"}><X size={17} /></button></header>
         <div className="admin-lead-detail__hero">
           <div className="admin-lead-detail__identity"><div><LeadImage lead={lead} /><span className="admin-company-image"><LeadImage lead={lead} company /></span></div><span><h2>{lead.name || lead.company}</h2><p>{lead.title || lead.seniority || (language === "ar" ? "عميل محتمل" : "Qualified prospect")}</p><small>{lead.company} · {lead.location || (language === "ar" ? "الموقع غير محدد" : "Location unavailable")}</small></span></div>
-          <div className="admin-lead-detail__badges"><span className={`lead-type-indicator is-${isB2C ? "b2c" : "b2b"}`}>{isB2C ? "B2C" : "B2B"}</span><span className={`admin-enrichment is-${lead.enrichment_status}`}><i /> {lead.enrichment_status} · {lead.enrichment_score}%</span></div>
+          <div className="admin-lead-detail__badges"><span className={`lead-type-indicator is-${isB2C ? "b2c" : "b2b"}`}>{isB2C ? "Wasla-Lite" : "Wasla-Astraeus"}</span><span className={`admin-enrichment is-${lead.enrichment_status}`}><i /> {lead.enrichment_status} · {lead.enrichment_score}%</span></div>
         </div>
         <div className="admin-lead-detail__content">
           <section className="admin-lead-detail__prompt"><h3><Target size={14} />{language === "ar" ? "طلب العميل الأصلي" : "Original account prompt"}</h3><p>{lead.purpose || "-"}</p></section>

@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import {extractMerchantContacts} from '../directus/extensions/directus-extension-waslah-lead-agent/dist/mahally.js';
+import {liteDeliveryBlocker} from '../directus/extensions/directus-extension-waslah-lead-agent/dist/lite-delivery-status.js';
+const failed={uniqueLeads:0,contactExclusions:{not_authorized:252},commentDiscovery:{contactRejections:{not_authorized:4}},merchantFallbackStatus:'disabled'};
+assert.deepEqual(extractMerchantContacts('<p>Reviewer: 0555555001</p><a href="tel:0555555002">Call store</a><a href="https://wa.me/966555555003">WhatsApp</a>').businessPhones,['+966555555002','+966555555003']);
+assert.match(liteDeliveryBlocker(failed,30),/252 listing candidates and 4 commenter accounts/);
+assert.match(liteDeliveryBlocker(failed,30),/fallback is disabled/);
+assert.equal(liteDeliveryBlocker({...failed,uniqueLeads:2},30),null);
+assert.equal(liteDeliveryBlocker({uniqueLeads:0},30),null);
+assert.match(liteDeliveryBlocker({mahally:{exclusions:{not_authorized:3}},merchantFallbackStatus:'unconfigured'},30),/3 stores.*not configured/);
+console.log('PASS: authorization shortfalls take precedence over timeout/source-exhaustion messages; absent and partial results remain distinct.');

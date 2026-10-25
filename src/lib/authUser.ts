@@ -11,6 +11,8 @@ export type AuthUser = {
   verifiedPhone: boolean;
   freeCreditSar: number;
   includedLeads: number;
+  subscriptionStatus: "pending" | "active";
+  subscriptionPlan: "launch" | "scale" | "autopilot" | null;
   createdAt: string;
   isAdmin: boolean;
 };
@@ -32,7 +34,9 @@ export function accountToAuthUser(account: AccountProfile): AuthUser {
     avatarTone: createAvatarTone(account.avatar_seed || account.name),
     verifiedPhone: account.phone_verified,
     freeCreditSar: account.wallet.balance,
-    includedLeads: account.welcome_offer?.included_leads ?? 30,
+    includedLeads: account.welcome_offer?.included_leads ?? 0,
+    subscriptionStatus: account.subscription?.status ?? "pending",
+    subscriptionPlan: account.subscription?.plan ?? null,
     createdAt: account.created_at,
     isAdmin: account.is_admin,
   };

@@ -1,6 +1,8 @@
 import * as React from "react"
 
-const MOBILE_BREAKPOINT = 768
+// The dashboard needs the full-width drawer through tablet layouts. Keeping
+// the permanent sidebar until 768px squeezed the header and data grids.
+const MOBILE_BREAKPOINT = 1025
 
 export function useIsMobile() {
   const [isMobile, setIsMobile] = React.useState<boolean | undefined>(undefined)

@@ -1,0 +1,15 @@
+# Lite conversation and audience routing
+
+New sales chats explain Wasla/Lite/Astraeus/Ultra before lead intake when asked. General Wasla questions and greetings are excluded from customer product facts. Arabic conversation uses friendly Saudi wording. Model descriptions are grounded in current capability: Lite product/merchant prospects, Astraeus company/role criteria, Ultra the same B2B criteria with a usable phone required. No direct mobile, buying-intent, source-platform membership or full-count guarantee is invented.
+
+Conversation repair: stored turns preserve chronological order and repeated messages. Browser-provided mission context and stale onboarding assistant turns cannot be appended after the stored conversation. Only newer browser user turns are appended. Natural English/Arabic negative answers resolve the audience question; clarification explains the selected audience while preserving the existing brief. Standalone model metadata such as `ready=false` and raw missing-permission codes are removed from assistant prose. Specific model questions receive specific answers instead of the entire comparison every time. This changes chat presentation/context, not personal-contact authorization enforcement.
+
+Once product and geography are clear, Lite asks whether the intended customer could operate an online store (Salla, Zid, Shopify). Yes selects merchant product discovery. No selects relevant marketplace advertisers. Explicit audience statements skip this question, and later corrections override earlier answers. The route is persisted in the acquisition plan and preserved when campaigns are created or retried. Sharing a platform name describes the audience; the merchant worker does not verify a store's software platform.
+
+Merchant route: generate ten precise product keywords, with Arabic spelling variants, English names and appropriate known brands. Traverse each keyword using the browser's supported controls and keep store/phone deduplication across keywords. Stop at the exact committed target or the end of all available keyword sources. No marketplace calls or marketplace readiness checks run on this route.
+
+Marketplace route: generate six precise product keywords. A keyword in the listing title OR body qualifies relevance; no buyer-intent, commercial/closed/job, ownership-proxy or minimum-score filter applies. Delivery still requires a valid available contact, current authorization and workspace deduplication. The earlier five-minute-per-30 runtime and proportional 1,000-listing cap remain. No comment stage or merchant fallback runs for an explicitly selected marketplace audience.
+
+Legacy campaigns without a selected audience retain their earlier staged route. This is deliberately not an automatic migration of historical target choices. New chats should be used to choose the new audience.
+
+Tests: `scripts/test-lite-audience.mjs`, chat/keyword/deadline/consent regressions and isolated PostgreSQL tests. A target count is not a guarantee that sufficient unique matching public contacts exist.

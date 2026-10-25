@@ -155,6 +155,23 @@ const collections = [
     },
   },
   {
+    name: "sales_access_requests",
+    icon: "lock_clock",
+    note: "Private Wasla sales queue. A plan is activated only after an administrator records full payment.",
+    fields: {
+      id: uuid(),
+      organization_id: uuid(false),
+      user_id: uuid(false),
+      plan: string({ length: 30 }),
+      status: string({ required: true, length: 30, defaultValue: "pending" }),
+      payment_reference: string({ length: 255, hidden: true, unique: true }),
+      activated_by: uuid(false),
+      paid_at: timestamp(),
+      created_at: timestamp("date-created"),
+      updated_at: timestamp("date-updated"),
+    },
+  },
+  {
     name: "phone_verifications",
     icon: "sms",
     note: "Short-lived OTP attempts. Codes are never stored in plaintext.",
@@ -196,7 +213,7 @@ const collections = [
   {
     name: "lead_research_reports",
     icon: "travel_explore",
-    note: "Saved B2B intelligence and Relevance research jobs. Job metadata is stored privately within the report.",
+    note: "Saved Wasla-Astraeus intelligence and Relevance research jobs. Job metadata is stored privately within the report.",
     fields: {
       id: uuid(),
       report_key: string({ required: true, unique: true, length: 500 }),
@@ -216,7 +233,7 @@ const collections = [
   {
     name: "b2c_campaigns",
     icon: "person_search",
-    note: "B2C marketplace acquisition plans and execution state.",
+    note: "Wasla-Lite marketplace acquisition plans and execution state.",
     fields: {
       id: uuid(),
       organization_id: uuid(false),
@@ -291,7 +308,7 @@ const collections = [
   {
     name: "b2c_lead_outcomes",
     icon: "conversion_path",
-    note: "Conversion feedback for improving B2C search-query precision.",
+    note: "Conversion feedback for improving Wasla-Lite search-query precision.",
     fields: {
       id: uuid(),
       outcome_key: string({ required: true, unique: true, length: 500 }),
@@ -362,6 +379,35 @@ const collections = [
       preview: json(),
       status: string({ required: true, length: 40 }),
       created_at: timestamp("date-created"),
+    },
+  },
+  {
+    name: "lead_pipeline_stages",
+    icon: "view_kanban",
+    note: "Per-user stages in the lead sales pipeline.",
+    fields: {
+      id: uuid(),
+      organization_id: uuid(false),
+      user_id: uuid(false),
+      name: string({ required: true, length: 80 }),
+      position: integer({ required: true, defaultValue: 0 }),
+      created_at: timestamp("date-created"),
+      updated_at: timestamp("date-updated"),
+    },
+  },
+  {
+    name: "lead_pipeline_cards",
+    icon: "style",
+    note: "Per-user lead placements in the sales pipeline.",
+    fields: {
+      id: uuid(),
+      placement_key: string({ required: true, unique: true, length: 80, hidden: true }),
+      interest: string({ length: 32 }),
+      organization_id: uuid(false),
+      user_id: uuid(false),
+      lead_id: uuid(false),
+      stage_id: uuid(false),
+      updated_at: timestamp("date-updated"),
     },
   },
   {
@@ -814,24 +860,28 @@ function fieldPayload(collection, field, definition) {
 
 async function ensureCollection(spec, existingNames) {
   if (!existingNames.has(spec.name)) {
-    await request("/collections", {
-      method: "POST",
-      body: JSON.stringify({
-        collection: spec.name,
-        meta: {
+    try {
+      await request("/collections", {
+        method: "POST",
+        body: JSON.stringify({
           collection: spec.name,
-          icon: spec.icon,
-          note: spec.note,
-          hidden: false,
-          singleton: false,
-          accountability: "all",
-        },
-        schema: { name: spec.name },
-        fields: Object.entries(spec.fields).map(([field, definition]) => fieldPayload(spec.name, field, definition)),
-      }),
-    });
-    console.log(`Created ${spec.name}`);
-    return;
+          meta: {
+            collection: spec.name,
+            icon: spec.icon,
+            note: spec.note,
+            hidden: false,
+            singleton: false,
+            accountability: "all",
+          },
+          schema: { name: spec.name },
+          fields: Object.entries(spec.fields).map(([field, definition]) => fieldPayload(spec.name, field, definition)),
+        }),
+      });
+      console.log(`Created ${spec.name}`);
+      return;
+    } catch (error) {
+      if (!String(error.message).includes(`Collection \"${spec.name}\" already exists`)) throw error;
+    }
   }
 
   const currentFields = await request(`/fields/${spec.name}`);

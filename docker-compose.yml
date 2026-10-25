@@ -29,6 +29,8 @@ services:
       - .env.docker
       - .env.haraj
       - .env.relevance
+      - path: .env.mahally
+        required: false
     environment:
       HOST: "0.0.0.0"
       PORT: "8055"
@@ -52,7 +54,21 @@ services:
       AUTH_GOOGLE_ISSUER_DISCOVERY_MUST_SUCCEED: "false"
       WASLAH_CUSTOMER_ROLE_ID: "${WASLAH_CUSTOMER_ROLE_ID:-8c62f1c4-258c-4d77-92f2-33f87db31765}"
       OPENROUTER_API_KEY: "${OPEN_ROUTER_TOKEN:-}"
-      B2C_OPENROUTER_MODEL: "${B2C_OPENROUTER_MODEL:-openai/gpt-4o-mini}"
+      TREG_TOKEN: "${TREG_TOKEN:-}"
+      TREG_ORG: "${TREG_ORG:-}"
+      TREG_BASE_URL: "${TREG_BASE_URL:-https://treg.to}"
+      SIGNAL_RUN_BUDGET_USD: "${SIGNAL_RUN_BUDGET_USD:-1}"
+      SIGNAL_OPENAI_MODEL: "${SIGNAL_OPENAI_MODEL:-gpt-4.1-mini}"
+      B2C_OPENROUTER_MODEL: "${B2C_OPENROUTER_MODEL:-openrouter/free}"
+      B2C_OPENROUTER_PLANNING_MODEL: "${B2C_OPENROUTER_PLANNING_MODEL:-openrouter/free}"
+      B2C_OPENROUTER_QUALIFICATION_MODEL: "${B2C_OPENROUTER_QUALIFICATION_MODEL:-openrouter/free}"
+      B2C_CONTACT_CONCURRENCY: "1"
+      B2C_AI_QUALIFICATION_BATCH_SIZE: "${B2C_AI_QUALIFICATION_BATCH_SIZE:-12}"
+      B2C_JEV_SHADOW: "${B2C_JEV_SHADOW:-true}"
+      B2C_QUALIFICATION_CONCURRENCY: "${B2C_QUALIFICATION_CONCURRENCY:-2}"
+      B2C_PAGE_QUEUE_CAPACITY: "${B2C_PAGE_QUEUE_CAPACITY:-2}"
+      B2C_OPENAI_QUALIFICATION_MODEL: "${B2C_OPENAI_QUALIFICATION_MODEL:-gpt-4.1-mini}"
+      OPENROUTER_CHAT_MODEL: "${OPENROUTER_CHAT_MODEL:-openrouter/free}"
     volumes:
       - directus_uploads:/directus/uploads
       - ./directus/extensions:/directus/extensions
@@ -87,6 +103,27 @@ services:
     networks:
       - waslah
     restart: "no"
+
+  mahally:
+    profiles: ["mahally"]
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.mahally
+    image: waslah/mahally:local
+    container_name: waslah_mahally
+    env_file:
+      - path: .env.mahally
+        required: false
+    networks: [waslah]
+    init: true
+    shm_size: "512mb"
+    read_only: true
+    tmpfs: ["/tmp:size=512m,mode=1777"]
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true", "seccomp=./infra/mahally-seccomp.json"]
+    pids_limit: 256
+    mem_limit: "1g"
+    restart: unless-stopped
 
   n8n:
     image: docker.n8n.io/n8nio/n8n:2.32.7

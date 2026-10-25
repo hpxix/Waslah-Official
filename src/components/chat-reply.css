@@ -1,0 +1,19 @@
+.chat-response-time { display: inline-block; color: #929297; font-size: 11px; line-height: 1.5; font-variant-numeric: tabular-nums; margin-block-start: 6px; }
+.research-activity .chat-response-time { margin: 0; min-width: 4ch; }
+.chat-reply-reveal { min-height: 1.5em; overflow-wrap: anywhere; }
+.chat-work-summary { color:#929297; margin-block:0 22px; width:100%; text-align:start; unicode-bidi:isolate; }
+.chat-work-summary > summary { display:flex; align-items:center; gap:7px; list-style:none; font-size:14px; font-weight:400; cursor:pointer; padding-block:6px 14px; border-block-end:1px solid #303033; }
+.chat-work-summary > summary::-webkit-details-marker { display:none; }
+.chat-work-summary > summary > span { margin-inline-start:3px; font-size:18px; }
+.chat-work-summary[open] > summary > span { transform:rotate(90deg); }
+.chat-work-summary .chat-response-time { display:flex; gap:5px; justify-content:flex-start; width:100%; text-align:start; unicode-bidi:isolate; }
+#root .hconsole .ops-chat-message__content:has(.chat-work-summary) { unicode-bidi:normal; }
+.chat-reply-reveal { unicode-bidi:plaintext; }
+.chat-tool-status { display:flex; align-items:center; gap:10px; color:#96969c; padding-block:8px; font-size:14px; }
+#root .hconsole .ops-chat-message.is-research,
+#root .hconsole .ops-chat-message.is-research > .chat-tool-status { background:transparent !important; border:0; box-shadow:none; }
+.chat-tool-status strong { font-weight:400; }
+.chat-tool-status .chat-response-time { margin:0; font-size:12px; }
+.chat-tool-status strong, .chat-loading-text { color:#929297; background:linear-gradient(105deg,#929297 35%,#eeeeef 49%,#929297 63%); background-size:250% 100%; background-clip:text; -webkit-background-clip:text; -webkit-text-fill-color:transparent; animation:chat-text-beam 2.4s linear infinite; }
+@keyframes chat-text-beam { from { background-position:150% 0; } to { background-position:-100% 0; } }
+@media(prefers-reduced-motion:reduce) { .chat-tool-status strong,.chat-loading-text { animation:none; background:none; -webkit-text-fill-color:currentColor; } }

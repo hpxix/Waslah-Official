@@ -17,7 +17,7 @@ const messages: Record<string, Record<Language, string>> = {
   "nav.workflow": { ar: "آلية العمل", en: "Workflow" },
   "nav.workspace": { ar: "مساحة العملاء", en: "Client workspace" },
   "nav.login": { ar: "دخول", en: "Sign in" },
-  "nav.start": { ar: "ابدأ مجاناً", en: "Start free" },
+  "nav.start": { ar: "اطلب الوصول", en: "Request access" },
   "nav.open": { ar: "فتح المساحة", en: "Open workspace" },
   "landing.live": { ar: "وكيل العملاء يعمل الآن", en: "Lead agent is live" },
   "landing.title": { ar: "وكيل وصلة للعملاء", en: "Wasla Lead Agent" },
@@ -37,8 +37,8 @@ const messages: Record<string, Record<Language, string>> = {
   },
   "landing.protected": { ar: "بيانات محمية", en: "Protected data" },
   "landing.credit": {
-    ar: "30 عميلاً مجاناً + 100 ر.س",
-    en: "30 free leads + 100 SAR credit",
+    ar: "رصيد 200–500 ر.س بعد الاشتراك المدفوع",
+    en: "200–500 SAR credit with a paid plan",
   },
   "landing.qualified": { ar: "مؤهل قبل الكشف", en: "Qualified before reveal" },
   "workflow.eyebrow": {
@@ -72,7 +72,7 @@ const messages: Record<string, Record<Language, string>> = {
     ar: "بياناتك معزولة داخل مساحة شركتك",
     en: "Your data is isolated inside your company workspace",
   },
-  "auth.begin": { ar: "ابدأ مجاناً", en: "Start free" },
+  "auth.begin": { ar: "اطلب الوصول", en: "Request access" },
   "auth.welcome": { ar: "مرحباً بعودتك", en: "Welcome back" },
   "auth.createTitle": {
     ar: "أنشئ مساحة شركتك",
@@ -80,8 +80,8 @@ const messages: Record<string, Record<Language, string>> = {
   },
   "auth.loginTitle": { ar: "ادخل إلى مساحة وصلة", en: "Sign in to Wasla" },
   "auth.createBody": {
-    ar: "لا بطاقة بنكية. وثّق جوالك واحصل على 30 عميلاً مجاناً ورصيد 100 ر.س.",
-    en: "No card required. Verify your phone to unlock 30 free leads and 100 SAR credit.",
+    ar: "وصلة خدمة خاصة. أدخل بياناتك للانضمام إلى قائمة فريق المبيعات؛ يُفعّل الرصيد بعد تأكيد الدفع الكامل.",
+    en: "Wasla is a private service. Share your details to join the sales queue; plan credit activates only after full payment is confirmed.",
   },
   "auth.loginBody": {
     ar: "أكمل من حيث توقفت، بنفس الطلبات والرصيد والفريق.",
@@ -122,14 +122,15 @@ const messages: Record<string, Record<Language, string>> = {
   },
   "auth.code": { ar: "رمز التحقق", en: "Verification code" },
   "auth.verifyButton": {
-    ar: "توثيق وتفعيل العرض المجاني",
-    en: "Verify and activate free offer",
+    ar: "توثيق الجوال",
+    en: "Verify phone",
   },
   "auth.resend": { ar: "إرسال رمز جديد", en: "Send a new code" },
   "console.overview": { ar: "نظرة عامة", en: "Overview" },
   "console.growth": { ar: "مركز النمو", en: "Growth engine" },
   "console.persona": { ar: "شخصية النشاط", en: "Business Persona" },
   "console.leads": { ar: "العملاء", en: "Leads" },
+  "console.crm": { ar: "إدارة العملاء", en: "CRM" },
   "console.socials": { ar: "القنوات", en: "Socials" },
   "console.listings": { ar: "دليل الشركات", en: "Company listings" },
   "console.insights": { ar: "الرؤى", en: "Insights" },

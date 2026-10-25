@@ -30,14 +30,20 @@ import { accountToAuthUser } from "../lib/authUser";
 import type { AuthUser } from "../lib/authUser";
 import { LanguageToggle, useLanguage } from "../i18n";
 import { WaslaBrand } from "./WaslaBrand";
+import { LiquidMetalEdge } from "./LiquidMetalEdge";
 
 type AuthDialogProps = {
   initialMode?: Mode;
+  selectedPlan?: "launch" | "scale" | "autopilot" | null;
   open: boolean;
   user: AuthUser | null;
   onClose: () => void;
   onAuthenticated: (user: AuthUser) => void;
-  onCelebration: (message: { title: string; body: string }) => void;
+  onCelebration: (
+    message: { title: string; body: string },
+    eventKey: string,
+    accountId: string,
+  ) => void;
   onReady: (user: AuthUser) => void;
 };
 
@@ -187,6 +193,7 @@ function launchConfetti() {
 
 export function AuthDialog({
   initialMode = "signup",
+  selectedPlan = null,
   open,
   user,
   onClose,
@@ -260,9 +267,9 @@ export function AuthDialog({
         }
         const account = accountToAuthUser(await getAccount());
         onAuthenticated(account);
-        if (account.verifiedPhone) {
-          onReady(account);
+        if (account.subscriptionStatus === "pending" || account.verifiedPhone) {
           onClose();
+          onReady(account);
         } else {
           const verification = await requestPhoneVerification();
           setOtpHint(verification.dev_code ?? null);
@@ -324,23 +331,12 @@ export function AuthDialog({
         privacy_accepted: true,
         permissions_accepted: true,
         consent_version: consentVersion,
+        plan: selectedPlan,
       });
       const account = accountToAuthUser(await getAccount());
       onAuthenticated(account);
-      await sendVerification();
-      setStep("verify");
-      launchConfetti();
-      onCelebration(
-        language === "ar"
-          ? {
-              title: `حياك الله يا ${account.name.split(" ")[0]}`,
-              body: "تم ربط حسابك وإنشاء مساحة وصلة. وثّق الجوال لتفعيل 30 عميلاً مجاناً ورصيد 100 ر.س.",
-            }
-          : {
-              title: `Welcome, ${account.name.split(" ")[0]}`,
-              body: "Your workspace is ready. Verify your phone to unlock 30 free leads and 100 SAR credit.",
-            },
-      );
+      onClose();
+      onReady(account);
     } catch (cause) {
       setError(
         exactAuthError(
@@ -411,24 +407,13 @@ export function AuthDialog({
         privacy_accepted: true,
         permissions_accepted: true,
         consent_version: consentVersion,
+        plan: selectedPlan,
       });
       await loginAccount(form.email.trim(), form.password);
       const account = accountToAuthUser(await getAccount());
       onAuthenticated(account);
-      await sendVerification();
-      setStep("verify");
-      launchConfetti();
-      onCelebration(
-        language === "ar"
-          ? {
-              title: `حياك الله يا ${account.name.split(" ")[0]}`,
-              body: "تم إنشاء مساحة وصلة بنجاح. بقي توثيق الجوال لتفعيل 30 عميلاً مجاناً ورصيد 100 ر.س.",
-            }
-          : {
-              title: `Welcome, ${account.name.split(" ")[0]}`,
-              body: "Your Wasla workspace is ready. Verify your phone to unlock 30 free leads and 100 SAR credit.",
-            },
-      );
+      onClose();
+      onReady(account);
     } catch (cause) {
       setError(
         exactAuthError(
@@ -459,9 +444,9 @@ export function AuthDialog({
       await loginAccount(form.email.trim(), form.password);
       const account = accountToAuthUser(await getAccount());
       onAuthenticated(account);
-      if (account.verifiedPhone) {
-        onReady(account);
+      if (account.subscriptionStatus === "pending" || account.verifiedPhone) {
         onClose();
+        onReady(account);
       } else {
         await sendVerification();
         setStep("verify");
@@ -501,16 +486,18 @@ export function AuthDialog({
       onCelebration(
         language === "ar"
           ? {
-              title: "عرضك المجاني جاهز",
-              body: "تم توثيق الجوال وتفعيل 30 عميلاً مجاناً ورصيد بداية بقيمة 100 ر.س.",
+              title: "تم توثيق جوالك",
+              body: "مساحة وصلة جاهزة بعد تأكيد الاشتراك المدفوع من فريق المبيعات.",
             }
           : {
-              title: "Your welcome offer is ready",
-              body: "Phone verified. Your 30 free leads and 100 SAR starter credit are active.",
+              title: "Phone verified",
+              body: "Your Wasla workspace is ready once Sales confirms the paid subscription.",
             },
+        "phone-verified",
+        account.id,
       );
-      onReady(account);
       onClose();
+      onReady(account);
     } catch (cause) {
       setError(
         exactAuthError(
@@ -540,6 +527,7 @@ export function AuthDialog({
         aria-label={language === "ar" ? "إغلاق التسجيل" : "Close registration"}
       />
       <section className="auth-dialog__window">
+        <LiquidMetalEdge className="auth-dialog__window-edge" />
         <aside className="auth-dialog__story">
           <div className="auth-dialog__story-head">
             <WaslaBrand variant="horizontal" />
@@ -613,7 +601,10 @@ export function AuthDialog({
                     setError("");
                   }}
                 >
-                  {t("auth.signup")}
+                  {mode === "signup" ? (
+                    <LiquidMetalEdge className="auth-dialog__tab-edge" />
+                  ) : null}
+                  <span>{t("auth.signup")}</span>
                 </button>
                 <button
                   className={mode === "login" ? "active" : ""}
@@ -622,7 +613,10 @@ export function AuthDialog({
                     setError("");
                   }}
                 >
-                  {t("auth.signin")}
+                  {mode === "login" ? (
+                    <LiquidMetalEdge className="auth-dialog__tab-edge" />
+                  ) : null}
+                  <span>{t("auth.signin")}</span>
                 </button>
               </div>
               <div className="auth-dialog__fields">
@@ -729,22 +723,27 @@ export function AuthDialog({
                 onClick={mode === "signup" ? createAccount : signIn}
                 disabled={busy}
               >
-                {busy ? (
-                  <LoaderCircle className="is-spinning" size={18} />
-                ) : mode === "signup" ? (
-                  <UserPlus size={18} />
-                ) : (
-                  <LockKeyhole size={18} />
-                )}
-                {mode === "signup"
-                  ? t("auth.createButton")
-                  : t("auth.loginButton")}
-                {!busy &&
-                  (language === "ar" ? (
-                    <ArrowLeft size={17} />
+                <LiquidMetalEdge className="auth-dialog__submit-edge" />
+                <span className="auth-dialog__submit-content">
+                  {busy ? (
+                    <LoaderCircle className="is-spinning" size={18} />
+                  ) : mode === "signup" ? (
+                    <UserPlus size={18} />
                   ) : (
-                    <ArrowRight size={17} />
-                  ))}
+                    <LockKeyhole size={18} />
+                  )}
+                  <strong>
+                    {mode === "signup"
+                      ? t("auth.createButton")
+                      : t("auth.loginButton")}
+                  </strong>
+                  {!busy &&
+                    (language === "ar" ? (
+                      <ArrowLeft size={17} />
+                    ) : (
+                      <ArrowRight size={17} />
+                    ))}
+                </span>
               </button>
               {mode === "login" && (
                 <p className="auth-dialog__terms">
@@ -825,18 +824,21 @@ export function AuthDialog({
                 onClick={completeSocialProfile}
                 disabled={busy}
               >
-                {busy ? (
-                  <LoaderCircle className="is-spinning" size={18} />
-                ) : (
-                  <UserPlus size={18} />
-                )}
-                {t("auth.socialButton")}
-                {!busy &&
-                  (language === "ar" ? (
-                    <ArrowLeft size={17} />
+                <LiquidMetalEdge className="auth-dialog__submit-edge" />
+                <span className="auth-dialog__submit-content">
+                  {busy ? (
+                    <LoaderCircle className="is-spinning" size={18} />
                   ) : (
-                    <ArrowRight size={17} />
-                  ))}
+                    <UserPlus size={18} />
+                  )}
+                  <strong>{t("auth.socialButton")}</strong>
+                  {!busy &&
+                    (language === "ar" ? (
+                      <ArrowLeft size={17} />
+                    ) : (
+                      <ArrowRight size={17} />
+                    ))}
+                </span>
               </button>
               <p className="auth-dialog__terms">
                 {language === "ar"
@@ -888,12 +890,15 @@ export function AuthDialog({
                 onClick={verifyPhone}
                 disabled={busy}
               >
-                {busy ? (
-                  <LoaderCircle className="is-spinning" size={18} />
-                ) : (
-                  <BadgeCheck size={18} />
-                )}
-                {t("auth.verifyButton")}
+                <LiquidMetalEdge className="auth-dialog__submit-edge" />
+                <span className="auth-dialog__submit-content">
+                  {busy ? (
+                    <LoaderCircle className="is-spinning" size={18} />
+                  ) : (
+                    <BadgeCheck size={18} />
+                  )}
+                  <strong>{t("auth.verifyButton")}</strong>
+                </span>
               </button>
               <button
                 className="auth-dialog__resend"
@@ -907,13 +912,13 @@ export function AuthDialog({
                 <div>
                   <strong>
                     {language === "ar"
-                      ? "30 عميلاً مجاناً + رصيد 100 ر.س"
-                      : "30 free leads + 100 SAR credit"}
+                      ? "رصيد عند الاشتراك المدفوع"
+                      : "Credit with a paid plan"}
                   </strong>
                   <span>
                     {language === "ar"
-                      ? "تُفعّل مرة واحدة بعد توثيق الجوال"
-                      : "Activated once after phone verification"}
+                      ? "200 أو 300 أو 500 ر.س بعد تأكيد الدفع الكامل"
+                      : "200, 300, or 500 SAR after full payment is confirmed"}
                   </span>
                 </div>
               </div>

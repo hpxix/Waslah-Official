@@ -1,0 +1,54 @@
+import assert from 'node:assert/strict';
+import {recoverHarajSearch} from '../directus/extensions/directus-extension-waslah-lead-agent/dist/haraj-safety.js';
+import {CURATED_SOURCES, buildSourceInput, routeIntent, sourceMinimumResults, recordMatchesIndustry, normalizeSourceRecord} from '../directus/extensions/directus-extension-waslah-lead-agent/dist/curated-sources.js';
+import {recoverSourceReview, isSourceDiagnostic} from '../directus/extensions/directus-extension-waslah-lead-agent/dist/astraeus-router.js';
+import {evaluateSignals} from '../directus/extensions/directus-extension-waslah-lead-agent/dist/signals.js';
+
+let calls = 0; const waits = [];
+assert.equal(await recoverHarajSearch(async () => { if (++calls < 3) throw Object.assign(new Error('transient'), {code:'HARAJ_REQUEST_FAILED',status:503}); return 'ok'; }, {sleep:async ms=>waits.push(ms)}), 'ok');
+assert.equal(calls,3); assert.deepEqual(waits,[1500,3000]);
+assert.equal(isSourceDiagnostic({status:'no_results',returnedThisRun:0,'a - whyZero':'No exact matches'}),true);
+assert.equal(isSourceDiagnostic({fullName:'Example',companyName:'Agency',status:'active'}),false);
+for (const error of [{code:'HARAJ_REQUEST_FAILED',status:401},{code:'HARAJ_REQUEST_FAILED',status:429},{code:'HARAJ_REQUEST_FAILED',safetyPause:true},{code:'HARAJ_INVALID_RESPONSE'}]) {
+  calls=0; await assert.rejects(recoverHarajSearch(async()=>{calls++;throw error;},{sleep:async()=>{}})); assert.equal(calls,1);
+}
+calls=0;await assert.rejects(recoverHarajSearch(async()=>{calls++;throw Object.assign(new Error('offline'),{code:'HARAJ_REQUEST_FAILED'});},{sleep:async()=>{}}));assert.equal(calls,3);
+const source=CURATED_SOURCES.find(s=>s.key==='pipeline');
+const schema={properties:{totalResults:{minimum:1},hasPhone:{},hasEmail:{},roleMatchMode:{},companyMatchMode:{},companyLocationCountryIncludes:{},companyLocationCityIncludes:{},personTitleIncludes:{},companyKeywordIncludes:{},companyIndustryIncludes:{items:{enum:['Marketing & Advertising','Public Relations & Communications','Agriculture']}},companySizeIncludes:{items:{enum:['1-10','11-50','51-200','201-500','501-1000','1001-5000','5001-10000','10001+']}}}};
+const filters={companyIndustryIncludes:['agency'],companySizeIncludes:['50+'],personTitleIncludes:['Founder','CEO']};const post=[];
+const input=buildSourceInput(source,{filters},routeIntent({query:'Agency founders in Riyadh'}),10,true,schema,post);
+assert.deepEqual(input.companyKeywordIncludes,['agency']);assert.equal(input.companyIndustryIncludes,undefined);
+assert.deepEqual(input.companySizeIncludes,['11-50','51-200','201-500','501-1000','1001-5000','5001-10000','10001+']);
+assert.deepEqual(post.find(p=>p.key==='companySizeIncludes').values,['50+']);
+assert.equal(recordMatchesIndustry({companyIndustry:'Staffing & Recruiting',companyDescription:'Recruitment agency serving Saudi employers'},filters),true);
+assert.equal(recordMatchesIndustry({companyIndustry:'Agriculture',companyDescription:'Farm operator'},filters),false);
+assert.equal(recordMatchesIndustry({organization_industry:'Marketing & Advertising'},{companyIndustryIncludes:['Digital Marketing']}),true);
+const microRecord={full_name:'Example',organization_name:'Example Agency',organization_website_url:'https://example.test',city:'Riyadh',country:'Saudi Arabia'};
+assert.equal(normalizeSourceRecord(microRecord,CURATED_SOURCES.find(s=>s.key==='microworlds'),{city:'Riyadh'},false).website,'https://example.test');
+assert.equal(normalizeSourceRecord(microRecord,CURATED_SOURCES.find(s=>s.key==='microworlds'),{city:'Riyadh',noWebsite:true},false),null);
+const marketing=buildSourceInput(source,{filters:{companyIndustryIncludes:['Digital Marketing','Public Relations and Communications']}},routeIntent({query:'Marketing agencies in Riyadh'}),10,true,schema,[]);
+assert.deepEqual(marketing.companyIndustryIncludes,['Marketing & Advertising','Public Relations & Communications']);
+const aliases=buildSourceInput(source,{filters:{companyIndustryIncludes:['Marketing & Advertising','Digital Marketing'],personTitleIncludes:['CEO','Chief Executive Officer']}},routeIntent({query:'Marketing executives in Riyadh'}),2,true,schema,[]);
+assert.deepEqual(aliases.companyIndustryIncludes,['Marketing & Advertising']);assert.deepEqual(aliases.personTitleIncludes,['CEO']);
+const peaky=CURATED_SOURCES.find(s=>s.key==='peaky');
+assert.equal(sourceMinimumResults(peaky,{properties:{totalResults:{minimum:100}}}),100);
+assert.throws(()=>buildSourceInput(peaky,{filters:{}},routeIntent({query:'Saudi founders'}),60,true,{properties:{totalResults:{minimum:100}}}),/documented minimum/);
+calls=0;
+const recovered=await recoverSourceReview([{index:0},{index:1}],async rows=>{calls++;return {leads:rows.filter(r=>calls>1||r.index===0).map(r=>({index:r.index,accepted:r.index===0,matches_requested_criteria:r.index===0,reason:r.index===0?'Matches exact target':'Not relevant'}))};});
+assert.equal(recovered.leads.length,2);assert.equal(recovered.unresolved.length,0);assert.equal(calls,2);
+const missing=await recoverSourceReview([{index:0}],async()=>({leads:[]}));assert.deepEqual(missing.unresolved,[0]);assert.equal(missing.leads.length,0);assert.ok(missing.calls<=4);
+calls=0;
+const signal=await evaluateSignals({OPENAI_API_KEY:'fixture'}, {state:{people:[]},questions:[{id:'a'},{id:'b'}]},async(url,options)=>{
+  const q=JSON.parse(JSON.parse(options.body).input).questions;calls++;
+  if(calls===2)assert.deepEqual(q.map(v=>v.id),['b']);
+  return Response.json({output_text:JSON.stringify({answers:q.filter(v=>calls>1||v.id==='a').map(v=>({id:v.id,score:2,role:'founder_exec',reason:'Explicit role and business fit'}))})});
+});
+assert.equal(signal.answers.length,2);assert.equal(calls,2);
+calls=0;await assert.rejects(evaluateSignals({OPENAI_API_KEY:'fixture'},{state:{},questions:[{id:'a'}]},async()=>{calls++;return new Response('{}',{status:401});}),/EVALUATOR_UNAVAILABLE/);assert.equal(calls,1);
+let primaryCalls=0;
+const providers={OPENAI_API_KEY:'cooldown-fixture',OPENROUTER_API_KEY:'cooldown-fixture'};
+const fallback=async url=>{if(String(url).includes('api.openai.com')){primaryCalls++;return new Response('{}',{status:503});}return Response.json({choices:[{message:{content:JSON.stringify({answers:[{id:'a',score:2,role:'founder_exec',reason:'Explicit business fit'}]})}}]});};
+await evaluateSignals(providers,{state:{},questions:[{id:'a'}]},fallback);
+await evaluateSignals(providers,{state:{},questions:[{id:'a'}]},fallback);
+assert.equal(primaryCalls,1,'Do not repeat an unhealthy reviewer on every subsequent batch');
+console.log('All-model recovery: bounded search-only retries, source minimums, native target filters, exact employee boundaries, missing-review recovery and auth fail-closed checks passed. No external calls.');

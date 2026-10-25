@@ -1,0 +1,115 @@
+// Fed to Node inside Directus by run-contact-consent-postgres.mjs.
+// Uses a random isolated schema, never production tables or provider APIs.
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {readdirSync} from 'node:fs';
+import {randomUUID,createHmac} from 'node:crypto';
+import {createConsentWorkflow,canonicalConsentJson,CONSENT_STATEMENT_VERSION} from '/directus/extensions/directus-extension-waslah-lead-agent/dist/contact-consent.js';
+import {createContactAuthorizer,authorizeContactExport} from '/directus/extensions/directus-extension-waslah-lead-agent/dist/contact-authorization.js';
+import {persistQualifiedB2CLead,serializeB2CLead,runB2CCampaign} from '/directus/extensions/directus-extension-waslah-lead-agent/dist/b2c.js';
+import {recordMerchantDirectoryContact} from '/directus/extensions/directus-extension-waslah-lead-agent/dist/merchant-directory.js';
+const require=createRequire(import.meta.url),folder=readdirSync('/directus/node_modules/.pnpm').find(name=>name.startsWith('knex@'));
+const knex=require(`/directus/node_modules/.pnpm/${folder}/node_modules/knex`);
+const connection={host:process.env.DB_HOST,port:Number(process.env.DB_PORT||5432),database:process.env.DB_DATABASE,user:process.env.DB_USER,password:process.env.DB_PASSWORD};
+const root=knex({client:'pg',connection});
+const schema=`consent_test_${randomUUID().replaceAll('-','')}`;
+let db,created=false;
+globalThis.fetch=()=>{throw Error('Provider traffic forbidden');};
+try{
+  await root.raw(`CREATE SCHEMA "${schema}"`);created=true;
+  db=knex({client:'pg',connection,searchPath:[schema],pool:{min:0,max:5}});
+  for(const migration of migrations)await db.raw(migration);
+  // Repeat migrations to verify idempotent deployment.
+  for(const migration of migrations)await db.raw(migration);
+  const env={HARAJ_CONSENT_SIGNING_SECRET:'postgres-fixture-signing-only-123456789',HARAJ_CONSENT_BRIDGE_TOKEN:'postgres-fixture-bridge-only-123456789',HARAJ_CONSENT_ISSUER:'test'};
+  const workflow=createConsentWorkflow({database:db,env}),org=randomUUID(),phone='+966555555001';
+  const context={organizationId:org,organizationName:'Synthetic',userId:randomUUID(),authorId:'12',actions:['save','reveal','download','call'],expiresAt:new Date(Date.now()+86400_000).toISOString()};
+  const request=await workflow.request(context),challenge=await workflow.challenge(request.id);
+  const body={event_id:randomUUID(),issuer:'test',type:'grant',request_id:request.id,subject_author_id:'12',statement_version:CONSENT_STATEMENT_VERSION,verification_method:'haraj_session_and_phone_verification',contact_kind:'personal',actions:context.actions,expires_at:context.expiresAt,verified_phones:[phone],challenge:challenge.challenge};
+  const timestamp=String(Math.floor(Date.now()/1000)),headers={'x-consent-timestamp':timestamp,'x-consent-event-id':body.event_id,'x-consent-signature':'sha256='+createHmac('sha256',env.HARAJ_CONSENT_SIGNING_SECRET).update(`${timestamp}.${body.event_id}.${canonicalConsentJson(body)}`).digest('hex')};
+  const results=await Promise.all([workflow.attest(headers,body),workflow.attest(headers,body)]);
+  assert.equal(results.filter(row=>row.status==='authorized').length,1);assert.equal(results.filter(row=>row.status==='already_processed').length,1);
+  assert.equal((await createContactAuthorizer(db,org)({authorId:'12',action:'call',phone})).allowed,true);
+  const merchantRequest=await workflow.request({...context,provider:'mahally'}),merchantChallenge=await workflow.challenge(merchantRequest.id);
+  const merchantBody={...body,event_id:randomUUID(),provider:'mahally',request_id:merchantRequest.id,statement_version:merchantRequest.statementVersion,verification_method:'merchant_identity_and_phone_verification',contact_kind:'public_business',challenge:merchantChallenge.challenge};
+  const merchantTimestamp=String(Math.floor(Date.now()/1000));
+  const merchantHeaders={'x-consent-timestamp':merchantTimestamp,'x-consent-event-id':merchantBody.event_id,'x-consent-signature':'sha256='+createHmac('sha256',env.HARAJ_CONSENT_SIGNING_SECRET).update(`${merchantTimestamp}.${merchantBody.event_id}.${canonicalConsentJson(merchantBody)}`).digest('hex')};
+  await workflow.attest(merchantHeaders,merchantBody);
+  assert.equal((await createContactAuthorizer(db,org)({provider:'mahally',authorId:'12',action:'save',phone})).allowed,true);
+  // Exercise the real Lite inventory/target/billing transaction for a synthetic
+  // authorized merchant. Tables live only in this disposable test schema.
+  const table=async(name,fields)=>db.schema.createTable(name,t=>{for(const [kind,names] of Object.entries(fields))for(const field of names)t[kind](field);});
+  await table('b2c_campaigns',{uuid:['id'],text:['status']});
+  await table('lead_requests',{uuid:['id'],text:['status','error_message'],integer:['result_count'],timestamp:['updated_at']});
+  await table('b2c_leads',{uuid:['id','organization_id','campaign_id','inventory_id'],text:['lead_key','source_internal','author_username','phone','city','tier','marketplace_role','explanation','status'],integer:['author_id','score','identity_confidence','purchase_propensity'],jsonb:['evidence'],timestamp:['created_at','updated_at']});
+  await table('lead_inventory',{uuid:['id'],text:['fingerprint','name','title','company','company_normalized','email','phone','website','location','industry','source','source_reference','qualification_status','enrichment_status','enrichment_summary'],integer:['fit_score','enrichment_score'],jsonb:['enrichment_signals','raw_payload'],timestamp:['last_enriched_at','created_at','updated_at']});
+  await table('lead_request_results',{uuid:['id','organization_id','request_id','user_id','lead_id'],text:['result_key','organization_name','request_query','user_email','status'],integer:['rank'],jsonb:['preview'],timestamp:['created_at']});
+  await db.schema.alterTable('lead_request_results',t=>t.unique('result_key'));
+  await table('directus_users',{uuid:['id'],text:['email']});await table('organizations',{uuid:['id'],text:['name']});
+  await table('wallets',{uuid:['id','organization_id'],integer:['balance_halalas'],timestamp:['updated_at']});
+  await table('wallet_transactions',{uuid:['id','organization_id','wallet_id','reference_id'],text:['type','idempotency_key','reference_type'],integer:['amount_halalas'],jsonb:['metadata'],timestamp:['created_at']});
+  await table('lead_access_grants',{uuid:['id','organization_id','lead_id','transaction_id'],text:['grant_key','grant_reason'],timestamp:['granted_at']});
+  const campaign={id:randomUUID(),organization_id:org,user_id:context.userId,request_id:randomUUID(),target_lead_count:2,original_prompt:'Synthetic steam stores in Riyadh'};
+  await db('b2c_campaigns').insert({id:campaign.id,status:'RUNNING'});await db('lead_requests').insert({id:campaign.request_id,status:'sourcing',result_count:0});
+  await db('wallets').insert({id:randomUUID(),organization_id:org,balance_halalas:1000});
+  await db('directus_users').insert({id:context.userId,email:'fixture@example.test'});await db('organizations').insert({id:org,name:'Synthetic workspace'});
+  const candidate={postId:'mahally:120',authorId:null,authorUsername:'mahally:12',title:'steam',bodyText:'',city:'Riyadh',tags:[],url:'https://mahally.com/en/products/12/120/',contactSubject:{provider:'mahally',authorId:'12'},merchant:{storeId:'12',name:'Fixture store',domain:'https://merchant.example',contactSourceUrls:['https://merchant.example/contact']},businessContact:{phones:[phone],origin:'official_merchant_website'},matchedStrategy:{strategyType:'MAHALLY_MERCHANT',searchTerm:'steam',query:'steam',weight:1}};
+  const qualification={isQualified:true,score:65,identityConfidence:0,purchasePropensity:0,evidenceStrength:100,grade:'MEDIUM',marketplaceRole:'MERCHANT_CONTACT',matchedSignals:['steam'],explanation:'Synthetic merchant fixture'};
+  assert.equal((await persistQualifiedB2CLead(db,campaign,candidate,qualification,{contactMobile:phone},true)).created,true);
+  assert.equal((await persistQualifiedB2CLead(db,campaign,candidate,qualification,{contactMobile:phone},true)).reason,'duplicate');
+  assert.equal(Number((await db('lead_requests').where({id:campaign.request_id}).first()).result_count),1);
+  assert.equal(Number((await db('wallets').first()).balance_halalas),900,'one fixture charge only');
+  assert.equal(Number((await db('wallet_transactions').count('* as n').first()).n),1);
+  const storedMerchant=await db('b2c_leads').first(),shown=await serializeB2CLead(storedMerchant,true,db,org);
+  assert.equal(storedMerchant.author_id,null);assert.equal(storedMerchant.source_internal,'mahally');assert.equal(shown.phone,phone);assert.equal(shown.authorUsername,'Fixture store');assert.equal(shown.website,'https://merchant.example');
+  // A revocation waits for an already-authorized transaction; once committed,
+  // all subsequent operations deny. No permission cache is consulted.
+  let release,ready;const held=new Promise(resolve=>{release=resolve;}),started=new Promise(resolve=>{ready=resolve;});
+  const read=db.transaction(async trx=>{assert.equal((await createContactAuthorizer(trx,org,{lock:true})({authorId:'12',action:'save',phone})).allowed,true);ready();await held;});
+  await started;let revoked=false;
+  const revoke=workflow.revoke({...context}).then(()=>{revoked=true;});
+  await new Promise(resolve=>setTimeout(resolve,100));assert.equal(revoked,false,'exclusive revocation serializes with in-flight use');
+  release();await Promise.all([read,revoke]);
+  const legacy={id:randomUUID(),source:'haraj',author_id:'12',phone,raw_payload:{phone_numbers:[{number:phone}]}};
+  assert.equal((await authorizeContactExport(db,legacy,org,{action:'download'})).phone,null);
+  assert.equal((await createContactAuthorizer(db,org)({authorId:'12',action:'call',phone})).status,'revoked');
+  assert.equal((await createContactAuthorizer(db,org)({provider:'mahally',authorId:'12',action:'save',phone})).allowed,true,'Haraj revocation is scoped to Haraj');
+  const merchantLead={id:randomUUID(),source:'b2c',source_reference:'mahally:12',phone,raw_payload:{contact_subject:{provider:'mahally',authorId:'12'},phone_numbers:[{number:phone}]}};
+  assert.equal((await authorizeContactExport(db,merchantLead,org,{action:'download'})).phone,phone);
+  assert.equal((await authorizeContactExport(db,{id:randomUUID(),source:'b2c',source_reference:'mahally:12',phone},org,{action:'reveal'})).phone,phone,'projected rows retain provider identity without raw payload');
+  await workflow.revoke({...context,provider:'mahally'});
+  assert.equal((await authorizeContactExport(db,merchantLead,org,{action:'download'})).phone,null,'merchant revocation is immediately enforced on saved leads');
+  assert.equal((await serializeB2CLead(storedMerchant,true,db,org)).phone,null,'paid Lite reveal cannot bypass merchant revocation');
+  await assert.rejects(()=>db('wasla_contact_audit').update({detail:'tampered'}),/append-only/);
+  const audits=await db('wasla_contact_audit').select('*');assert.ok(audits.length>=7);assert.ok(!JSON.stringify(audits).includes(phone));
+  assert.equal(Number((await db('wasla_contact_authorizations').count('* as n').first()).n),2);
+  const directoryPhone='+966555555002',directory={storeId:'34',domain:'https://merchant.example',productUrl:'https://mahally.com/en/products/34/340/',sourceUrls:['https://merchant.example/contact'],phones:[directoryPhone]};
+  assert.equal(await recordMerchantDirectoryContact(db,org,directory),true);
+  const directoryCandidate={...candidate,postId:'mahally:340',authorUsername:'mahally:34',contactSubject:{provider:'mahally',authorId:'34'},merchant:{...candidate.merchant,storeId:'34'},businessContact:{phones:[directoryPhone],origin:'official_merchant_website'}};
+  assert.equal((await persistQualifiedB2CLead(db,campaign,directoryCandidate,qualification,{contactMobile:directoryPhone},true)).created,true);
+  const directoryRow=await db('b2c_leads').where({author_username:'mahally:34'}).first();
+  for(const action of ['reveal','download'])assert.equal((await authorizeContactExport(db,directoryRow,org,{sourceHint:'b2c',action})).phone,directoryPhone);
+  assert.equal((await createContactAuthorizer(db,org)({provider:'mahally',authorId:'34',action:'call',phone:directoryPhone})).allowed,false,'publication never creates calling consent');
+  assert.equal((await createContactAuthorizer(db,randomUUID())({provider:'mahally',authorId:'34',action:'reveal',phone:directoryPhone})).allowed,false,'workspace isolation');
+  assert.equal((await createContactAuthorizer(db,org)({provider:'haraj',authorId:'34',action:'save',phone:directoryPhone})).allowed,false,'merchant evidence cannot authorize Haraj people');
+  assert.equal((await createContactAuthorizer(db,org,{now:()=>Date.now()+31*86400000})({provider:'mahally',authorId:'34',action:'reveal',phone:directoryPhone})).allowed,false,'publication evidence expires');
+  await workflow.revoke({...context,provider:'mahally',authorId:'34'});
+  assert.equal((await authorizeContactExport(db,directoryRow,org,{sourceHint:'b2c',action:'download'})).phone,null,'directory withdrawal applies immediately');
+  assert.equal(await recordMerchantDirectoryContact(db,org,directory),false,'rediscovery cannot undo withdrawal');
+  assert.equal(Number((await db('wasla_contact_authorizations').count('* as n').first()).n),2,'directory mode fabricates no consent records');
+  await assert.rejects(recordMerchantDirectoryContact(db,org,{...directory,storeId:'99'}),/INVALID_MERCHANT_BINDING/);
+  await table('feature_flags',{text:['feature_key'],jsonb:['configuration']});
+  await db.schema.alterTable('b2c_campaigns',t=>{for(const key of ['organization_id','user_id','request_id'])t.uuid(key);t.integer('target_lead_count');t.text('original_prompt');t.text('error_message');t.jsonb('acquisition_plan');t.jsonb('stats');t.timestamp('updated_at');});
+  const keywords=Array.from({length:10},(_,i)=>`fixture-product-${i}`);
+  const merchantPlan={audienceRoute:'merchants',dealIntent:'sell',keywordMatching:{version:'saudi-keyword-v1',productTerms:keywords},strategies:[{cities:['Riyadh']}]};
+  await db('b2c_campaigns').where({id:campaign.id}).update({...campaign,acquisition_plan:JSON.stringify(merchantPlan),stats:JSON.stringify({}),status:'QUEUED'});
+  const result=await runB2CCampaign({database:db,campaignId:campaign.id,env:{MAHALLY_ENABLED:'true',MAHALLY_PUBLIC_DIRECTORY:'true',MAHALLY_WORKER_URL:'http://fixture.invalid',MAHALLY_WORKER_TOKEN:'fixture-token-not-used-123456789012345'}});
+  assert.equal(result.uniqueLeads,2);
+  assert.equal((await db('b2c_campaigns').where({id:campaign.id}).first()).status,'COMPLETED','merchant campaigns bypass the unconfigured Haraj guard');
+  console.log('PASS directory: actual save/billing/reveal/download without grant; no call scope; expiry, workspace/provider isolation, withdrawal and no fabricated consent.');
+  console.log('PASS PostgreSQL: migrations twice; real transactions, signed event idempotency, shared/exclusive revocation locking, legacy export denial, append-only phone-free audit. No production rows or providers touched.');
+}finally{
+  if(db)await db.destroy();
+  if(created&&/^consent_test_[a-f0-9]{32}$/.test(schema))await root.raw(`DROP SCHEMA "${schema}" CASCADE`);
+  await root.destroy();
+}
